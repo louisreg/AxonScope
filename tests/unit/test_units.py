@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
+import axonfleet as axs
+from axonfleet.axons.flattened import flatten_layout
 from tests.helpers import FakeSingleAxonResult
 
 
@@ -57,7 +58,7 @@ def test_top_level_unit_aliases_are_available():
 def test_units_convert_quantity_like_values():
     assert axs.units.to_um(FakeQuantity(1.5, "millimeter")) == 1500.0
     assert axs.units.to_ms(FakeQuantity(2.0, "second")) == 2000.0
-    assert axs.units.to_uA(FakeQuantity(2e-6, "ampere")) == 2.0
+    assert axs.units.to_scalar(FakeQuantity(2e-6, "ampere"), "microampere") == 2.0
     np.testing.assert_allclose(
         axs.units.to_mV_array(
             [
@@ -70,10 +71,10 @@ def test_units_convert_quantity_like_values():
 
 
 def test_direct_solver_time_values_accept_quantity_like_values():
-    from axonscope.timebase import resolve_time_args
+    from axonfleet.runtime.timebase import resolve_time
 
-    assert resolve_time_args(
-        tsim=FakeQuantity(0.002, "second"),
+    assert resolve_time(
+        duration=FakeQuantity(0.002, "second"),
         dt=FakeQuantity(0.001, "second"),
     ) == (2.0, 1.0)
 
@@ -103,16 +104,16 @@ def test_recording_positions_require_units():
 def test_recording_normalizes_explicit_indices():
     recording = axs.Recording.indices([0, 4], axs.signals.Vm)
 
-    assert recording.spatial is axs.RecordingSpatial.INDICES
+    assert recording.spatial is axs.recording.RecordingSpatial.INDICES
     assert recording.record_indices == (0, 4)
 
 
 def test_recording_plan_is_backend_neutral_and_computes_retained_width():
     plan = axs.Recording.probes(axs.signals.Vm, count=3).to_plan()
 
-    assert isinstance(plan, axs.RecordingPlan)
+    assert isinstance(plan, axs.recording.RecordingPlan)
     assert plan.signals == (axs.signals.Vm,)
-    assert plan.spatial is axs.RecordingSpatial.PROBES
+    assert plan.spatial is axs.recording.RecordingSpatial.PROBES
     assert plan.indices_for(5) == (0, 2, 4)
     assert plan.width_for(5) == 3
     assert axs.Recording.none().to_plan().indices_for(5) == ()
@@ -249,7 +250,7 @@ def test_layout_single_non_uniform_requires_unit_aware_coordinates():
     )
     layout = axs.axons.Layout.single_non_uniform(section, x=np.linspace(0.0, 1.0, 3) * axs.mm)
 
-    flat = axs.axons.flatten_layout(layout)
+    flat = flatten_layout(layout)
     np.testing.assert_allclose(flat.x_um, [0.0, 500.0, 1000.0])
     np.testing.assert_allclose(flat.diam_um, [0.5, 0.5, 0.5])
 
@@ -291,7 +292,7 @@ def test_layout_sequence_lengths_requires_units():
         compartments=[1],
         lengths=1.0 * axs.mm,
     )
-    assert axs.axons.flatten_layout(layout).length_um == pytest.approx(1000.0)
+    assert flatten_layout(layout).length_um == pytest.approx(1000.0)
 
     with pytest.raises(TypeError, match="lengths must include units compatible with length"):
         axs.axons.Layout.sequence(

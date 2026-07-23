@@ -1,51 +1,24 @@
 # Benchmark Baselines
 
-Baselines are external comparison entry points for benchmark campaigns. They
-must not become AxonScope runtime paths, public APIs, or imports from
-`src/axonscope`.
+Baselines are independent scientific reference entry points. They are not
+AxonFleet runtime paths or public APIs, and code under `src/axonfleet` must not
+import them.
 
-## Scope
+## ModelDB 230137
 
-The first baseline to define is NRV comparison for the two P11A curve scripts:
+`modeldb_230137_voltage_clamp.py` runs the externally downloaded ModelDB
+230137 Nav1.1-Nav1.9 mechanisms through NEURON and writes reference voltage
+clamp curves. The MOD files are deliberately not vendored.
 
-- activation/block threshold curves;
-- recruitment curves.
+Compile the ModelDB mechanisms first, then run the script in that checkout:
 
-The adapter should accept the same case vocabulary as `benchmark/run.py` where
-that vocabulary makes sense: duration, `dt`, population size, recording mode,
-cable/model family, diameter cohort, platform, repeats/warmups, and output
-directory. Unsupported AxonScope-only axes must be recorded explicitly instead
-of silently approximated.
+```bash
+nrnivmodl
+python /path/to/AxonFleet/benchmark/baselines/modeldb_230137_voltage_clamp.py \
+  --output modeldb_230137_voltage_clamp.json
+```
 
-## Contract
-
-Each baseline run should write the same evidence shape as AxonScope runs:
-
-- `cases.csv`
-- `results.csv`
-- `curve_summary.csv`
-- `events.jsonl`
-- `summary.csv`
-- `memory_summary.csv`
-- `environment.json`
-- `metadata.json`
-- `manifest.json`
-
-The baseline manifest must record:
-
-- baseline name and version;
-- adapter version;
-- package/environment metadata;
-- git state when the baseline is local code;
-- hardware metadata;
-- exact input mapping from AxonScope case options to baseline options;
-- known semantic differences.
-
-## Non-Goals For P11A
-
-- Do not call NRV from `src/axonscope`.
-- Do not mix NRV objects into `AxonSimulation`.
-- Do not claim numerical or performance equivalence until the adapter writes a
-  fresh artifact directory and the case mapping is reviewed.
-- Do not add a NumPy solver baseline until the NumPy solver exists.
-
+Pass the resulting JSON to
+`benchmark/curves/nav_isoform_voltage_clamp.py --modeldb-reference` for the
+AxonFleet comparison. The baseline records its source paths and mechanism
+inputs so results can be traced to the external checkout.

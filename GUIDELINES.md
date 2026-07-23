@@ -1,15 +1,15 @@
-# AxonScope Architecture Guidelines
+# AxonFleet Architecture Guidelines
 
 Snapshot: 2026-07-10.
 
-This is the consolidated architecture reference for AxonScope. It is normative
+This is the consolidated architecture reference for AxonFleet. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
 decisions. The source tree, tests, examples, and benchmark reports remain the
 implementation source of truth for current behavior.
 
 Use this document to answer three questions:
 
-1. What is AxonScope?
+1. What is AxonFleet?
 2. Which concepts are public and stable?
 3. Where must solver/runtime/backend code live?
 
@@ -21,7 +21,7 @@ belong in `AGENTS.md`.
 
 # 1. Current Status
 
-AxonScope is still pre-release and currently has one active user. Prefer the
+AxonFleet is still pre-release and currently has one active user. Prefer the
 clean final design over retrocompatibility, downstream migration paths,
 deprecated wrappers, argument aliases, or prototype APIs. Delete superseded
 paths rather than preserving shims.
@@ -41,7 +41,7 @@ Current focus after the P9 closeout:
 - keep benchmark/profiling experiments out of public tutorials while making the
   supported benchmark surface documented and reproducible;
 - keep membrane semantics, units, states, parameters, gates, channels, and
-  observables owned by AxonScope rather than by JAX-shaped backend
+  observables owned by AxonFleet rather than by JAX-shaped backend
   implementations;
 - keep membrane authoring user-facing: users define membrane models and
   equations in ordinary Python source, not intermediate representations or
@@ -71,7 +71,7 @@ Current focus after the P9 closeout:
   target file or rebuilding its execution contract from Model IR; Model IR may
   remain beside it for validation, inspection, composition, and reference
   execution.
-- keep built-in membrane model truth in `src/axonscope/membranes/models/`: each
+- keep built-in membrane model truth in `src/axonfleet/membranes/models/`: each
   model file owns its equations, unit-bearing defaults, public aliases, and
   derived parameter logic. Public constructors, `model_ir`, solvers, and
   backends must not duplicate model-family facts.
@@ -80,9 +80,9 @@ Current focus after the P9 closeout:
   only to the membrane descriptor/source compiler. Axon templates must not own
   model defaults, aliases, equations, derived parameter formulas, or unit
   conversion contracts.
-- treat `axs.runtime.numpy` as a future bonus reference/debug backend, not the next
-  product priority. It stays reserved and non-executable until the current JAX
-  path has a clean model/compiler contract and realistic benchmark evidence.
+- treat a future NumPy/SciPy runtime as a bonus reference/debug backend, not the
+  next product priority. Do not expose `axs.runtime.numpy` until it is executable
+  through the complete simulation, estimate, and inspection lifecycle.
 
 ## 1.1 Phase Snapshot
 
@@ -105,7 +105,7 @@ Current focus after the P9 closeout:
 | 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
 | 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with runtime boundary, keep factorized Vext internal. |
 | 7.8 - Runtime policy and inspection | Done for current JAX path | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; `AxonSimulation.inspect()` explains planning, dispatch, preparation, lowering, kernel, and result assembly through the runtime boundary. |
-| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `axs.runtime.numpy` stays reserved for a future bonus reference solver runtime. |
+| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonfleet.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonfleet.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. A future NumPy/SciPy reference solver remains deferred and has no public runtime target. |
 | 8 - NumPy/SciPy reference solver runtime | Deferred bonus | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route, and not the next implementation priority. |
 | 9 - Cold-run/runtime benchmark closeout | Done | `cold_run_micro`, normalized scalar/batch spans, explicit hotpath chunk controls, and decisions to park larger optimization campaigns until realistic evidence exists. |
 | 10 - Model/compiler surface cleanup | Active next | Flatten membrane helper/diagnostic/explain surfaces, harden compiler/cache identity, and prepare recording-aware pruning/fusion contracts before deeper solver work. |
@@ -123,22 +123,21 @@ Current focus after the P9 closeout:
 - VmRaster output remains exposed as `observations["vm_raster"]`, with
   `VmRasterResult` and CPU unpacking under `results`. Solver/runtime code owns
   only plan lowering and packed bit updates.
-- Fixed-step time-grid validation lives in backend-neutral `axonscope.timebase`.
+- Fixed-step time-grid validation lives in backend-neutral
+  `axonfleet.runtime.timebase`.
   Public planning, estimation, and inspection code must not import concrete
-  `axonscope.runtime.jax.*` helpers directly. Runtime-specific estimate and
-  inspection facts route through `axonscope.runtime.execution`, which delegates
-  to runtime-owned benchmark support such as `runtime/jax/benchmark.py`
+  `axonfleet.runtime.jax.*` helpers directly. Runtime-specific estimate and
+  inspection facts route through `axonfleet.runtime.execution`, which delegates
+  to runtime-owned support under `runtime/jax/benchmarking/`
   without forcing device transfers.
 - `ExecutionPolicy` now resolves JAX device requests and validates uniform
   precision. Runtime, device, and precision policy participate in JAX batch
   runtime cache identity; runtime execution still rejects implicit casting
   instead of rebuilding models.
-- `axs.runtime.numpy` is not an executable runtime yet. Passive, HH, and
-  Rattay-Aberham membrane semantics now run through Model IR with a NumPy
-  model-step oracle and JAX lowering, but a full NumPy/SciPy cable-solver
-  runtime is a separate bonus phase documented in `todo.md`. Do not implement
-  it before the membrane/compiler surface and current JAX optimization evidence
-  are clean.
+- Passive, HH, and Rattay-Aberham membrane semantics run through Model IR with
+  a NumPy model-step oracle and JAX lowering, but a full NumPy/SciPy
+  cable-solver runtime is a separate bonus phase documented in `todo.md`. Its
+  public runtime target must appear only once that backend is executable.
 - `estimate()` and `inspect()` must follow the same public workflow as
   execution. Prefer `AxonSimulation(...).estimate()` and
   `AxonSimulation(...).inspect()` over a separate root helper.
@@ -165,7 +164,7 @@ Current focus after the P9 closeout:
 
 ## 2.1 Pre-release Cleanup Policy
 
-Because AxonScope is not a stable deployed package and currently has one active
+Because AxonFleet is not a stable deployed package and currently has one active
 user, cleanup should optimize for a clean final architecture. Do not preserve
 retrocompatibility, downstream migration paths, compatibility aliases,
 deprecated wrappers, old argument names, or transition shims unless explicitly
@@ -199,7 +198,7 @@ tests, docs, and guardrails teach only the retained design.
 
 ## 2.2 Product Boundary
 
-AxonScope owns:
+AxonFleet owns:
 
 - one-dimensional axon models;
 - myelinated and unmyelinated axons;
@@ -213,7 +212,7 @@ AxonScope owns:
 - threshold, recruitment, and sweep workflows;
 - validation, reproducibility, and performance evidence.
 
-AxonScope must not own:
+AxonFleet must not own:
 
 - detailed nerve geometry;
 - fascicle geometry;
@@ -225,12 +224,12 @@ AxonScope must not own:
 - surgical placement models.
 
 External geometry or field packages should provide numerical extracellular
-footprints sampled along each axon. AxonScope combines those footprints with
+footprints sampled along each axon. AxonFleet combines those footprints with
 temporal stimuli and runs the cable/membrane dynamics.
 
 ## 2.3 Intrinsic Versus World Geometry
 
-AxonScope needs intrinsic one-dimensional position along an axon:
+AxonFleet needs intrinsic one-dimensional position along an axon:
 
 ```text
 s = 0 ... axon length
@@ -494,7 +493,6 @@ Use:
 ```python
 axs.runtime.auto
 axs.runtime.jax
-axs.runtime.numpy  # reserved for a future bonus NumPy/SciPy reference runtime
 
 axs.Device.auto()
 axs.Device.cpu()
@@ -530,9 +528,8 @@ single = result.single
 Current behavior:
 
 - `axs.runtime.auto` and `axs.runtime.jax` are valid for execution;
-- `axs.runtime.numpy` is reserved until a future bonus NumPy/SciPy reference
-  runtime has executable behavior, docs, examples, estimates, inspection, and
-  tests; it must not be advertised as executable for current solves;
+- a future NumPy/SciPy reference runtime gets a public target only after it has
+  executable behavior, docs, examples, estimates, inspection, and tests;
 - `Device.cpu()` and `Device.gpu(index=...)` resolve through the JAX backend or
   fail clearly;
 - uniform `float32` can execute when model dtypes match;
@@ -649,7 +646,7 @@ estimate path should warn when dense input memory is large.
 External geometry packages may own nerve geometry, trajectories, electrodes,
 conductivity, and FEM or analytical field solving.
 
-Their contract with AxonScope is numerical:
+Their contract with AxonFleet is numerical:
 
 ```text
 axon identifiers
@@ -659,14 +656,14 @@ units
 provenance
 ```
 
-AxonScope may provide lightweight analytical helpers for examples and tests,
+AxonFleet may provide lightweight analytical helpers for examples and tests,
 but those helpers should produce footprints and remain peripheral to solver
 execution.
 
 ## 5.7 Study Reuse
 
 The footprint/drive model is designed for amplitude sweeps, thresholds, and
-recruitment. When only stimulus samples change, AxonScope should reuse axon
+recruitment. When only stimulus samples change, AxonFleet should reuse axon
 preparation, footprints, spatial operators, dispatch groups, probe plans, and
 compiled executables whenever signatures remain compatible.
 
@@ -809,7 +806,7 @@ Rules:
 - lower fixed probes to static row-aware tables for padded/heterogeneous
   groups;
 - keep `VmRasterResult` and CPU unpacking under `results`;
-- protocols consume `axonscope.results` VmRaster output, not solver observer
+- protocols consume `axonfleet.results` VmRaster output, not solver observer
   internals;
 - do not retain full Vm just to recover row-specific targets later;
 - keep `PeakVoltage` and richer analyses post-hoc unless benchmark evidence
@@ -947,7 +944,7 @@ Forbidden dependencies:
 - `results/` depends on JAX array types;
 - analyses encode backend equations;
 - domain objects eagerly import visualization;
-- internal modules import top-level `axonscope`;
+- internal modules import top-level `axonfleet`;
 - mutable global precision silently changes compile identity.
 
 ## 8.2 Runtime Boundary
@@ -965,7 +962,7 @@ immutable Python descriptions
         -> execution
 ```
 
-The NumPy stage is host-side materialization, not the future `axs.runtime.numpy`
+The NumPy stage is host-side materialization, not a future NumPy/SciPy
 solver. It should produce compact structure-of-arrays representations, unique
 parameter tables plus row/compartment indices, masks, and stable signatures.
 The JAX stage consumes those numerical contracts and owns `jax.Array` creation,
@@ -985,23 +982,23 @@ not a second production path.
 
 Current boundary:
 
-- public simulation entry points call `axonscope.runtime.execution`, which
+- public simulation entry points call `axonfleet.runtime.execution`, which
   resolves the currently supported concrete backend without importing JAX
   adapters from `simulation.py`;
 - batch execution enters concrete JAX code only through backend execution
   facades, including one-row `B=1` simulations;
 - dispatcher modules own planning, grouping, progress, and dispatch records,
-  but must not import `axonscope.runtime.jax` or call the JAX group runner
+  but must not import `axonfleet.runtime.jax` or call the JAX group runner
   directly;
 - fixed-step time-grid validation and solver time-argument normalization live
-  in `axonscope.timebase`;
-- `axonscope.solvers` exports only stable solver-facing option contracts:
-  `SolverOptions`, `BatchOptions`, and `BatchRecording`;
+  in `axonfleet.runtime.timebase`;
+- `axonfleet.solvers` exports only the active batch execution contracts:
+  `BatchOptions` and `BatchRecording`;
 - JAX runtime preparation, stimulation compilation, batch kernels, low-level
   numerical helper kernels, observer packing, and backend input containers live
-  under `axonscope.runtime.jax`;
+  under `axonfleet.runtime.jax`;
 - backend-owned compiled-kernel caches live under
-  `.axonscope_cache/runtime/<backend>/` and remain internal runtime machinery;
+  `.axonfleet_cache/runtime/<backend>/` and remain internal runtime machinery;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
 - `solvers/` retains only solver-facing contracts; executable solver routes
   live under concrete runtimes.
@@ -1069,8 +1066,9 @@ Factorized `Vext`/`Iinj` is an internal optimization direction, not a user
 mode. The target extracellular lowering contract is shared by single-cable and
 double-cable runtimes: prepared rows lower to static spatial footprints plus an
 explicit temporal payload mode, then each cable solver consumes the modes it
-declares as supported. The detailed contract lives in
-`docs/architecture/p11e_extracellular_input_contract_2026_07_11.md`.
+declares as supported. The executable semantic contract lives in
+`axonfleet.runtime.inputs.contracts`; this section owns its architecture-level
+constraints.
 
 The active compact extracellular path is deliberately narrow:
 
@@ -1141,7 +1139,7 @@ REQUIRE   fail if a condition violates the reuse boundary
 NONE      treat every condition independently
 ```
 
-Lambdas are allowed, but AxonScope should not claim every lambda is
+Lambdas are allowed, but AxonFleet should not claim every lambda is
 serializable. Recommend named functions or frozen callable dataclasses for
 strong reproducibility.
 
@@ -1210,11 +1208,11 @@ empty directories.
 Cleanup reminders:
 
 - move `dispatcher/plan.py` responsibilities toward `planning/`;
-- keep host-side runtime-batch row helpers in `preparation/runtime_batches.py`
-  and backend array lowering under `runtime/jax`;
+- keep host-side axon, membrane, stimulation, and cohort row materialization in
+  `preparation/` and backend array lowering under `runtime/jax`;
 - keep fixed-step timebase rules out of JAX-heavy solver helper modules;
 - keep runtime dataclasses, preparation helpers, numerical helper kernels, and
-  batch kernels out of the `axonscope.solvers` package facade;
+  batch kernels out of the `axonfleet.solvers` package facade;
 - keep public `recording.py` independent from solver options;
 - keep JAX membrane/solver implementation under `runtime/jax`;
 - keep `solvers/` as a public facade for stable solver option contracts during
@@ -1245,8 +1243,8 @@ Examples must:
   point-source example needs external offsets, use `axs.analytical` helpers to
   build sampled footprints/drives before attaching stimulation;
 - when an NRV example needs reusable handoff logic, use the two-bridge contract
-  in `axonscope.integrations.nrv`: `population_from_nrv(...)` creates the
-  AxonScope population from NRV fibers, then `footprints_from_nrv(...)` samples
+  in `axonfleet.integrations.nrv`: `population_from_nrv(...)` creates the
+  AxonFleet population from NRV fibers, then `footprints_from_nrv(...)` samples
   every NRV electrode footprint on that population. Do not redefine fiber-row
   extraction, LIFE/FEM footprint sampling, or NRV recruitment decoding inside
   examples, and do not add NRV geometry/population/electrode builders to the
@@ -1268,7 +1266,7 @@ Current didactic example organization:
 
 ```text
 examples/basic/
-    compact first-pass scripts that show core AxonScope capabilities
+    compact first-pass scripts that show core AxonFleet capabilities
 examples/advanced/simulation_workflow/
     AxonSimulation, AxonPopulation, one/many execution, estimate/inspect/run
 examples/advanced/axon_models/
@@ -1347,8 +1345,8 @@ Do not make speed or memory claims from stale benchmark outputs.
 Guardrails should cover:
 
 - no JAX imports in public/descriptive layers;
-- no direct `dispatcher` imports from `axonscope.runtime.jax`;
-- no geometry package dependency in core AxonScope;
+- no direct `dispatcher` imports from `axonfleet.runtime.jax`;
+- no geometry package dependency in core AxonFleet;
 - no raw strings as preferred public API for closed/structured domains;
 - no legacy compatibility aliases, migration shims, deprecated wrappers, or old
   argument-name aliases;
@@ -1376,10 +1374,10 @@ Typed API:
 
 Product boundary:
 
-- AxonScope owns intrinsic axon geometry only;
+- AxonFleet owns intrinsic axon geometry only;
 - `AxonInstance` has no required world position;
 - external geometry packages provide numerical footprints;
-- core AxonScope does not depend on nerve geometry packages.
+- core AxonFleet does not depend on nerve geometry packages.
 
 Extracellular model:
 
@@ -1419,7 +1417,7 @@ Cleanup:
 
 Do not:
 
-- make AxonScope own nerve geometry;
+- make AxonFleet own nerve geometry;
 - make world position mandatory on `AxonInstance`;
 - keep electrode geometry in the solver core;
 - conflate footprint and stimulus;
@@ -1443,7 +1441,7 @@ Do not:
 
 # 16. Final Target API Sketch
 
-Build footprints outside AxonScope or with lightweight helpers:
+Build footprints outside AxonFleet or with lightweight helpers:
 
 ```python
 cathode_footprint = external_package.compute_footprint(
@@ -1510,7 +1508,7 @@ study = simulation.sweep(
 Defining principles:
 
 ```text
-AxonScope knows axons in intrinsic one-dimensional space, not nerve world space.
+AxonFleet knows axons in intrinsic one-dimensional space, not nerve world space.
 External geometry packages provide spatial extracellular footprints.
 One ExtracellularDrive combines one footprint with one stimulus.
 ExtracellularStimulation aggregates all drives.

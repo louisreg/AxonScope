@@ -3,13 +3,13 @@
 Run:
     python examples/advanced/axon_models/03_cable_formulation.py
 
-Phase 2 replaces raw formulation strings with ``axs.axons.CableFormulation``.
-Most users can rely on template defaults; the enum is useful for custom layouts.
+Most users can rely on template defaults. The typed
+``axs.axons.CableFormulation`` value is useful for custom layouts.
 """
 
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:

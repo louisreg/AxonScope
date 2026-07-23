@@ -1,10 +1,10 @@
-"""Run AxonScope on a realistic NRV histology-contour nerve.
+"""Run AxonFleet on a realistic NRV histology-contour nerve.
 
 Run:
     python examples/with_nrv/02_realistic_fascicle_geometry.py
 
 NRV owns the external geometry, fiber placement, and LIFE/FEM footprint
-sampling. AxonScope receives intrinsic axon layouts plus sampled
+sampling. AxonFleet receives intrinsic axon layouts plus sampled
 `ExtracellularFootprint` objects, then runs the recruitment sweep.
 """
 

@@ -16,7 +16,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -47,7 +47,7 @@ def main() -> None:
 
     # Step 2: activation at any recorded position counts as recruitment for this
     # population-level view.
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=pulse_start,
         target=axs.positions.ALL,

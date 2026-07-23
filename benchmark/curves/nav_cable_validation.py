@@ -21,9 +21,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
-from axonscope.membranes.models.borg_kdr import BorgKDR
-from axonscope.utils.units import cm2, mS, ohm
+import axonfleet as axs
+from axonfleet.membranes.models.borg_kdr import BorgKDR
+from axonfleet.utils.units import cm2, mS, ohm
 
 
 PULSE_START = 1.0 * axs.ms
@@ -141,10 +141,10 @@ def waveform_update() -> axs.protocols.ExtracellularWaveformUpdate:
     )
 
 
-def activation_criterion() -> axs.analysis.ActivationCriterion:
+def activation_criterion() -> axs.analysis.Activation:
     """Count only spikes reaching the distal end after stimulation begins."""
 
-    return axs.analysis.ActivationCriterion(
+    return axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=PULSE_START,
         target=axs.positions.DISTAL,
@@ -203,7 +203,7 @@ def run_waveform(cable: str) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
     time_ms = stimulated.time_values(unit=axs.ms)
     positions_um = stimulated.position_values(unit=axs.um)
     criterion = activation_criterion()
-    event = criterion.evaluate(stimulated)
+    event = criterion.detect(stimulated)
     velocity_definition = axs.analysis.ConductionVelocity(
         threshold=0.0 * axs.mV,
         peak_height=None,

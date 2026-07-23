@@ -5,16 +5,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import nrv
 import numpy as np
-import pytest
 
-from axonscope import AxonInstance, membranes, ms, um
-from axonscope.axons import Axon, Layout, Section
-from axonscope.stimulation import Stimulus
-from axonscope.utils import units
-from tests.nrv._helpers import run_axonscope_simulation
-
-
-pytestmark = pytest.mark.nrv_numerics
+from axonfleet import AxonInstance, membranes, ms, um
+from axonfleet.axons import Axon, Layout, Section
+from axonfleet.stimulation import Stimulus
+from axonfleet.utils import units
+from tests.nrv._helpers import run_axonfleet_simulation
 
 
 def test_passive_current_definition_matches_nrv_pas(save_dir="figures/physics_tests"):
@@ -54,7 +50,7 @@ def test_passive_current_definition_matches_nrv_pas(save_dir="figures/physics_te
             amplitude=current_nA,
         ),
     )
-    result = run_axonscope_simulation(
+    result = run_axonfleet_simulation(
         simulation,
         tsim=tsim_ms,
         dt=dt_ms,
@@ -106,12 +102,12 @@ def test_passive_current_definition_matches_nrv_pas(save_dir="figures/physics_te
     output = Path(save_dir)
     output.mkdir(parents=True, exist_ok=True)
     figure, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
-    axes[0].plot(t_as, result.Vm[:, center_as], label="AxonScope")
+    axes[0].plot(t_as, result.Vm[:, center_as], label="AxonFleet")
     axes[0].plot(t_as, vm_reference, "--", label="NRV passive reference")
     axes[0].set_ylabel("Vm [mV]")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
-    axes[1].plot(t_as, current_as, label="AxonScope")
+    axes[1].plot(t_as, current_as, label="AxonFleet")
     axes[1].plot(t_as, current_reference, "--", label="NRV pas equation")
     axes[1].set_xlabel("Time [ms]")
     axes[1].set_ylabel("I_l [mA/cm2]")

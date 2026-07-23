@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope import AxonInstance
-from axonscope.analysis import conduction_velocity, rasterize
-from axonscope.axons.unmyelinated import (
+import axonfleet as axs
+from axonfleet import AxonInstance
+from axonfleet.analysis import ConductionVelocity, rasterize
+from axonfleet.axons.unmyelinated import (
     HodgkinHuxley,
     Schild94,
     Schild97,
     Tigerholm,
 )
-from axonscope.stimulation import Stimulus
-from axonscope.timebase import simulation_step_count
+from axonfleet.stimulation import Stimulus
+from axonfleet.runtime.timebase import simulation_step_count
 
 
 def _hh_axon(nx: int = 51) -> AxonInstance:
@@ -106,7 +106,7 @@ def test_single_row_batch_route_propagates_action_potential():
     t_ap, _ = rasterize(result)
 
     assert len(t_ap) > 5
-    velocity = conduction_velocity(result)
+    velocity = ConductionVelocity().detect(result)
     assert np.isfinite(velocity)
     assert velocity > 0.0
 

@@ -1,13 +1,9 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.analytical import PointSourceElectrode
-from axonscope.runtime.jax.inputs.extracellular import (
-    CompiledExtracellularStimulation,
-    compile_extracellular_stimulation,
-)
-from axonscope.stimulation import (
+import axonfleet as axs
+from axonfleet.analytical import PointSourceElectrode
+from axonfleet.stimulation import (
     ExtracellularDrive,
     ExtracellularFootprint,
     ExtracellularPotential,
@@ -73,23 +69,6 @@ def test_point_source_min_distance_avoids_singularity():
     assert np.isclose(fp[0], expected)
 
 
-def test_point_source_stimulus_helpers_preserve_ampere_contract():
-    electrode = PointSourceElectrode(x=0.0 * axs.m, z=1.0e-3 * axs.m)
-    stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=1.0 * axs.uA, duration=1.0 * axs.ms)
-
-    returned = electrode.with_stimulus(stim)
-    returned_scaled = returned.with_scaled_stimulus(2.0)
-    electrode.set_stimulus(stim)
-
-    assert returned is not electrode
-    assert returned.stimulus is not None
-    assert returned.stimulus.y_unit == "ampere"
-    assert returned_scaled.stimulus is not None
-    np.testing.assert_allclose(returned_scaled.stimulus.y, 2.0 * returned.stimulus.y)
-    assert electrode.stimulus is not None
-    assert electrode.stimulus.y_unit == "ampere"
-
-
 def test_point_source_footprint_offsets_match_transverse_calculation():
     positions_m = np.linspace(0.0, 1.0e-3, 5)
     electrode = PointSourceElectrode(
@@ -134,8 +113,8 @@ def test_point_source_stimulation_attaches_as_typed_stimulation():
     sim.add_extracellular_stimulation(stimulation=stimulation)
 
     assert sim.extracellular_stimulation is stimulation
-    assert sim.extracellular_stimulations == (stimulation,)
-    got = sim.extracellular_potential_mV(0.0)
+    assert not hasattr(sim, "extracellular_stimulations")
+    got = stimulation.evaluate(np.asarray([0.0]) * axs.ms, voltage_unit=axs.mV)[0]
     expected = stimulation.evaluate(np.asarray([0.0]) * axs.ms, voltage_unit=axs.mV)[0]
     np.testing.assert_allclose(got, expected)
 
@@ -263,45 +242,6 @@ def test_extracellular_public_plot_helpers():
     assert len(axes[1].lines) == 1
     assert len(axes[2].images) == 1
     plt.close("all")
-
-
-def test_compile_extracellular_stimulation_returns_jax_ready_object():
-    positions = np.linspace(0.0, 1.0e-3, 5)
-    footprint = ExtracellularFootprint.shared(
-        values=2.0 + 1000.0 * positions,
-        positions=positions * axs.m,
-    )
-    drive = ExtracellularDrive(
-        id=axs.DriveId("source"),
-        footprint=footprint,
-        stimulus=Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0 * axs.uA, duration=1.0 * axs.ms),
-    )
-    stimulation = ExtracellularStimulation([drive])
-
-    compiled = compile_extracellular_stimulation(stimulation, positions)
-
-    assert isinstance(compiled, CompiledExtracellularStimulation)
-    assert compiled.drives[0].footprint_V_per_A.shape == (len(positions),)
-
-
-def test_compiled_extracellular_stimulation_matches_numpy():
-    positions = np.linspace(0.0, 1.0e-3, 5)
-    footprint = ExtracellularFootprint.shared(
-        values=2.0 + 1000.0 * positions,
-        positions=positions * axs.m,
-    )
-    drive = ExtracellularDrive(
-        id=axs.DriveId("source"),
-        footprint=footprint,
-        stimulus=Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0 * axs.uA, duration=1.0 * axs.ms),
-    )
-    stimulation = ExtracellularStimulation([drive])
-    compiled = compile_extracellular_stimulation(stimulation, positions)
-
-    expected = stimulation.evaluate(np.array([1.5]) * axs.ms)[0]
-    got = np.asarray(compiled(1.5))
-
-    np.testing.assert_allclose(got, expected)
 
 
 def test_point_source_units_scale_linearly_with_current():

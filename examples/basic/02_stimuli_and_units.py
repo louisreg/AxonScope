@@ -7,7 +7,7 @@ Run:
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -35,21 +35,37 @@ def main() -> None:
             amplitude=2.0 * current_unit,
             frequency_khz=1.0 * axs.kHz,
         ),
+        "ramp": axs.Stimulus.ramp(
+            start=0.5 * axs.ms,
+            duration=2.0 * axs.ms,
+            start_value=0.0 * current_unit,
+            stop_value=3.0 * current_unit,
+            dt=0.05 * axs.ms,
+        ),
     }
 
     # Stimuli are composable: this combined waveform can be attached to a single
     # electrode or clamp exactly like the primitive waveforms.
     stimuli["combined"] = stimuli["pulse"] + stimuli["biphasic"] + stimuli["sinus"]
+    stimuli["transformed"] = (
+        2.0
+        * (
+            stimuli["pulse"].shifted(6.0 * axs.ms).scaled(0.5).offset(0.25)
+            - axs.Stimulus.constant(0.25 * current_unit)
+        )
+    )
 
     # The time axis is also unit-bearing. The plot helper converts it to the
     # requested display units at the plotting boundary.
     t = np.linspace(0.0, 10.0, 2000) * axs.ms
-    fig, axes = plt.subplots(4, 1, figsize=(8, 7), sharex=True)
+    fig, axes = plt.subplots(len(stimuli), 1, figsize=(8, 10), sharex=True)
     colors = {
         "pulse": "tab:blue",
         "biphasic": "tab:red",
         "sinus": "tab:green",
+        "ramp": "tab:orange",
         "combined": "tab:purple",
+        "transformed": "tab:brown",
     }
     for ax, (label, stimulus) in zip(axes, stimuli.items(), strict=True):
         stimulus.plot(

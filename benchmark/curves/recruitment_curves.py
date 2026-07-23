@@ -14,7 +14,7 @@ from benchmark.workloads.curve_runtime import run_recruitment_curves
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser(
         "recruitment_curves",
-        description="Recruitment curve benchmark scaffold.",
+        description="Recruitment-curve benchmark.",
     )
     parser.add_argument("--amplitude-count", type=int, default=None)
     args = parser.parse_args(argv)

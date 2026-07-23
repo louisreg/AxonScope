@@ -19,7 +19,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -156,7 +156,7 @@ def main() -> None:
     print("=== Layout options ===")
     for title, layout in plots.items():
         positions_um = layout.position_values(unit=axs.um)
-        first_section = axs.axons.flatten_layout(layout).section_names[0]
+        first_section = layout.elements[0].section.name
         print(
             f"{title}: {positions_um.size} compartments, "
             f"x=[{positions_um[0]:.1f}, {positions_um[-1]:.1f}] um, "
@@ -184,7 +184,7 @@ def main() -> None:
             compartment_labels=True,
             max_compartment_labels=180,
         )
-    fig.suptitle("AxonScope descriptive layout options")
+    fig.suptitle("AxonFleet descriptive layout options")
     plt.show()
 
 

@@ -5,12 +5,12 @@ This layer has three separate responsibilities:
 - `Recording` describes what the solver should store.
 - `AxonSimulationResult` stores what public execution returned.
 - `AxonResultView` exposes one simulated axon row from that result.
-- `axonscope.analysis` turns returned arrays into scientific metrics with
+- `axonfleet.analysis` turns returned arrays into scientific metrics with
   statuses and population denominators.
-- `axonscope.analysis` also provides lower-level rasterization and velocity
+- `axonfleet.analysis` also provides lower-level rasterization and velocity
   helpers used by plotting and validation workflows.
-- `axonscope.results.views` provides raw result value/plot helpers, and
-  `axonscope.analysis.views` provides analysis-derived plots such as spike
+- `axonfleet.results.views` provides raw result value/plot helpers, and
+  `axonfleet.analysis.views` provides analysis-derived plots such as spike
   rasters.
 
 Keeping these responsibilities separate matters because a result may not contain
@@ -67,8 +67,9 @@ axs.Recording.indices([0, 5, 10], axs.signals.Vm)
 ```
 
 Signals are descriptors, not a closed enum. Built-in descriptors live under
-`axs.signals`, and custom descriptors can be built with `axs.Signal` and
-`axs.SignalId` for future workflows that produce new result channels.
+`axs.signals`, and custom descriptors can be built with `axs.signals.Signal`
+and `axs.identifiers.SignalId` for future workflows that produce new result
+channels.
 
 `Recording.full()` and observable descriptors such as `axs.signals.GATES` are
 valid policy objects, but current public execution supports Vm outputs only.
@@ -149,11 +150,10 @@ for result in results:
     print(result.recorded_axis.original_indices)
 
 dense_vm = results.signal(axs.signals.Vm)
-first = results.axon(0)
+first = results[0]
 center_trace = first.signal(axs.signals.Vm)
-vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
+available_signals = results.recording_manifest.available_signals
 row_recordings = results.recordings
-row_axes = results.recorded_axes
 row_final_states = results.final_states
 ```
 
@@ -161,16 +161,17 @@ For homogeneous recordings, `results.signal(axs.signals.Vm)` returns a dense
 array indexed as `(axon, time, recorded_position)`. Heterogeneous pools remain
 accessible through per-axon views; storage partitioning is an implementation
 detail, not a second result workflow.
-`results.recording_manifest` records which signals were requested, which
-signals are actually available, and advanced storage shape/dtype metadata.
+`results.recording_manifest` records which signals were requested and which
+signals are actually available. Dense-block shape and dtype are internal
+storage details.
 
 Public result surface audit:
 
 | Object | Role |
 | --- | --- |
-| `AxonSimulationResult` | canonical execution result for one row or many rows; supports indexing, iteration, `signal(...)`, `analyze(...)`, `report(...)`, diagnostics, observations, recordings, recorded axes, and final-state aggregation. |
+| `AxonSimulationResult` | canonical execution result for one row or many rows; supports indexing, iteration, `signal(...)`, `analyze(...)`, `report(...)`, observations, recordings, and final-state aggregation. |
 | `AxonResultView` | one simulated row; exposes `Vm`, `t`, `signal(...)`, `recorded_axis`, recordings, observations, diagnostics, final state, plots, and analysis/report helpers. |
-| `RecordedSignal` and `RecordingManifest` | structured record of requested and available signals. |
+| `RecordingManifest` | structured record of requested and available signals. |
 | `RecordedAxis` | canonical interpretation of retained Vm columns as intrinsic axon positions plus original layout indices. |
 | `AnalysisResult` | compact activation flags or first-crossing latencies stored under their definition names in `observations`. |
 | `VmRasterResult` | packed observer-only threshold raster stored under `observations["vm_raster"]`. |
@@ -272,9 +273,12 @@ spike_t_ms, spike_x_um = axs.analysis.rasterize(
     min_distance_ms=1.0,
 )
 
-velocity_m_s = axs.analysis.conduction_velocity(result)
-peaks_mV = axs.analysis.peak_voltage(result)
-positions_um = axs.analysis.recorded_positions_um(result)
+velocity_m_s = axs.analysis.ConductionVelocity().detect(result)
+positions_um = result.recorded_axis.position_values(unit=axs.um)
+
+peaks = result.analyze(
+    axs.analysis.PeakVoltage(target=axs.positions.ALL),
+)
 ```
 
 Threshold and timing arguments also accept Pint quantities:
@@ -287,19 +291,19 @@ spike_t_ms, spike_x_um = axs.analysis.rasterize(
 )
 ```
 
-`recorded_positions_um(result)` is the shared guardrail. It returns the physical
-positions represented by `Vm` columns. If a result is spatially filtered but does
-not carry `record_indices`, it raises a `ValueError` rather than guessing.
+`result.recorded_axis` is the shared guardrail for the physical positions
+represented by `Vm` columns. If a result is spatially filtered but does not
+carry `record_indices`, it raises a `ValueError` rather than guessing.
 Rasterization also validates that the minimum spike distance is non-negative.
 
-The low-level post-hoc activation criterion also lives under `axs.analysis`:
+The same activation definition can return one compact post-hoc event:
 
 ```python
-event = axs.analysis.ActivationCriterion(
+event = axs.analysis.Activation(
     threshold=-20 * axs.mV,
     blanking=0.2 * axs.ms,
     target=axs.positions.DISTAL,
-).evaluate(result)
+).detect(result)
 
 event.activated
 event.first_time_ms
@@ -323,30 +327,7 @@ ax = axs.analysis.views.plot_spike_raster(
 )
 ```
 
-## Online Vm Observers
-
-Activation analyses can create lightweight online observers that consume
-membrane-voltage chunks and finalize to the same `AnalysisResult` shape as
-post-hoc definitions. `PeakVoltage` remains a post-hoc analysis on recorded Vm:
-
-```python
-activation = axs.analysis.Activation(
-    threshold=-20 * axs.mV,
-    target=axs.positions.DISTAL,
-)
-
-observer = activation.online_observer(
-    positions=result.recorded_axis.position_values(unit=axs.um) * axs.um,
-    original_indices=result.recorded_axis.original_indices,
-)
-observer.update(
-    result.time_values(unit=axs.ms) * axs.ms,
-    result.voltage_values(unit=axs.mV) * axs.mV,
-)
-
-online_activation = observer.finalize()
-posthoc_activation = result.analyze(activation)
-```
+## Solver-Side Vm Raster
 
 Solver-side observer-only execution uses one probe-and-threshold lowering with
 typed retention policies. An `axs.analysis.Activation(...)`-only request updates

@@ -8,14 +8,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.dispatcher import build_dispatch_plan
-from axonscope.dispatcher.plan import dispatch_plan_identity_key
+import axonfleet as axs
+from axonfleet.dispatcher.plan import build_dispatch_plan
+from axonfleet.dispatcher.plan import dispatch_plan_identity_key
 from benchmark.campaigns.double_cable_solver_policy import (
     main as run_solver_policy_campaign,
-)
-from benchmark.campaigns.single_cable_solver_policy import (
-    main as run_single_cable_solver_policy_campaign,
 )
 from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
@@ -420,59 +417,6 @@ def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
     assert "--repeat-pool-policy" in manifest["runs"][0]["command"]
 
 
-def test_single_cable_solver_policy_campaign_expands_solver_matrix(
-    tmp_path: Path,
-    capsys,
-):
-    assert (
-        run_single_cable_solver_policy_campaign(
-            [
-                "--preset",
-                "quick",
-                "--platform",
-                "cpu",
-                "--curve-script",
-                "recruitment_curves",
-                "--solver",
-                "auto,jax_tridiagonal",
-                "--recording",
-                "observer_only",
-                "--n-axons",
-                "4",
-                "--nx",
-                "21",
-                "--precision",
-                "fp32",
-                "--diameters",
-                "same_diameter",
-                "--repeat-pool-policy",
-                "reuse",
-                "--output",
-                str(tmp_path),
-                "--dry-run",
-            ]
-        )
-        == 0
-    )
-
-    out = capsys.readouterr().out
-    assert "planned: 2 single-cable solver policy runs" in out
-    assert "--single-cable-solver auto" in out
-    assert "--single-cable-solver jax_tridiagonal" in out
-
-    manifest = json.loads(
-        (tmp_path / "single_cable_solver_policy_manifest.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert [run["single_cable_solver"] for run in manifest["runs"]] == [
-        "auto",
-        "jax_tridiagonal",
-    ]
-    assert all("--cable" in run["command"] for run in manifest["runs"])
-    assert all("single_cable" in run["command"] for run in manifest["runs"])
-
-
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():
     parser = build_parser("recruitment_curves", description="test parser")
     args = parser.parse_args(
@@ -500,31 +444,6 @@ def test_resolved_options_accept_public_tiled_thomas_solver_policy():
         is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     )
     assert solver_policy.double_cable.tiled_thomas_options.block_b == 64
-
-
-def test_resolved_options_accept_public_single_cable_solver_policy():
-    parser = build_parser("recruitment_curves", description="test parser")
-    args = parser.parse_args(
-        [
-            "--preset",
-            "quick",
-            "--platform",
-            "gpu",
-            "--cable",
-            "single_cable",
-            "--single-cable-solver",
-            "jax_tridiagonal",
-        ]
-    )
-
-    options = resolved_options(args)
-    solver_policy = curve_runtime._solver_policy(options)
-
-    assert options["single_cable_solver"] == "jax_tridiagonal"
-    assert (
-        solver_policy.single_cable.kind
-        is axs.runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
-    )
 
 
 def test_threshold_defaults_follow_example07_mrg_bounds():
@@ -685,12 +604,14 @@ def test_curve_workload_fast_point_source_matches_public_helper(curve_context):
         stimulus=drive.stimulus,
         axon_y=float(row_meta[0]["axon_y_um"]) * axs.um,
         axon_z=float(row_meta[0]["axon_z_um"]) * axs.um,
-        axon_id=axs.AxonId("row_00000"),
+        axon_id=axs.identifiers.AxonId("row_00000"),
     )
 
     np.testing.assert_allclose(
-        drive.footprint.values_for_axon(axs.AxonId("row_00000")),
-        expected.drives[0].footprint.values_for_axon(axs.AxonId("row_00000")),
+        drive.footprint.values_for_axon(axs.identifiers.AxonId("row_00000")),
+        expected.drives[0].footprint.values_for_axon(
+            axs.identifiers.AxonId("row_00000")
+        ),
         rtol=1e-12,
         atol=1e-12,
     )
@@ -1091,7 +1012,7 @@ def test_curve_workload_keeps_distinct_templates_for_distinct_diameters():
     )
 
 
-def test_curve_workload_reuses_templates_after_axonscope_diameter_quantization():
+def test_curve_workload_reuses_templates_after_axonfleet_diameter_quantization():
     parser = build_parser("threshold_curves", description="test parser")
     args = parser.parse_args(
         [

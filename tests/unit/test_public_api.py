@@ -1,40 +1,15 @@
 import numpy as np
 
-from axonscope import (
-    Activation,
-    ActivationObserver,
-    AnalysisInputRequirement,
-    AnalysisResult,
-    AnalysisStatus,
-    AssemblyDetailInspection,
+from axonfleet import (
     AxonInstance,
     AxonPopulation,
     AxonSimulation,
     BatchOptions,
-    BatchRecording,
-    BenchmarkReport,
-    BenchmarkSession,
     Device,
-    DispatchGroupInspection,
     ExecutionPolicy,
-    IntracellularContext,
     IntracellularCurrentClamp,
-    KernelInspection,
-    LoweringInspection,
-    MemoryInspection,
-    MemoryEstimateItem,
-    MembraneSourceInspection,
-    PaddingInspection,
     PrecisionPolicy,
-    ProbeInspection,
-    RecordingPlan,
-    ResultAssemblyInspection,
     SimulationInspection,
-    RecordingSpatial,
-    Signal,
-    SignalId,
-    SimulationEstimate,
-    SimulationEstimateGroup,
     Stimulus,
     SolverPolicy,
     VM_RASTER_OBSERVATION_KEY,
@@ -43,32 +18,32 @@ from axonscope import (
     benchmark_report,
     disable_benchmark,
     enable_benchmark,
-    preparation,
     reset_benchmark,
     runtime,
     um,
 )
-from axonscope import analysis, analytical, membranes, positions, results, signals
-from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, mrg_like_length_from_nodes
+from axonfleet import (
+    analysis,
+    analytical,
+    benchmarking,
+    identifiers,
+    inspection,
+    membranes,
+    performance,
+    positions,
+    recording,
+    signals,
+    solvers,
+)
+from axonfleet.axons import HodgkinHuxley, MRG, RattayAberham
 
-def test_public_package_imports_are_available():
+def test_public_package_imports_and_typed_values_are_available():
     assert Stimulus.constant(1.0).y[0] == 1.0
     assert analysis.rasterize is not None
-    assert analysis.ActivationCriterion is not None
-    assert analysis.ActivationObserver is ActivationObserver
-    assert not hasattr(analysis, "PeakVoltageObserver")
-    assert not hasattr(__import__("axonscope"), "PeakVoltageObserver")
-    assert analysis.AnalysisInputRequirement is AnalysisInputRequirement
+    assert analysis.Activation is not None
     assert analysis.views.plot_spike_raster is not None
-    assert not hasattr(results, "analysis")
-    assert not hasattr(results, "visualization")
-    assert not hasattr(results, "plot_raster")
-    assert not hasattr(results, "rasterplot")
-    assert Activation is __import__("axonscope").analysis.Activation
-    assert AnalysisResult is __import__("axonscope").analysis.AnalysisResult
-    assert AnalysisStatus.VALID.value == "VALID"
-    assert not hasattr(__import__("axonscope"), "PointSourceElectrode")
-    assert not hasattr(__import__("axonscope").stimulation, "PointSourceElectrode")
+    assert analysis.AnalysisResult is not None
+    assert analysis.AnalysisStatus.VALID.value == "VALID"
     electrode = analytical.PointSourceElectrode(
         x=0.0 * um,
         z=1000.0 * um,
@@ -77,80 +52,51 @@ def test_public_package_imports_are_available():
     stimulation = analytical.point_source_stimulation(
         electrode,
         np.asarray([0.0]) * um,
-        sigma=0.3 * __import__("axonscope").S_per_m,
+        sigma=0.3 * __import__("axonfleet").S_per_m,
     )
     assert stimulation.drives[0].id.value == "point_source"
-    for legacy_name in (
-        "Electrode",
-        "AnalyticalElectrode",
-        "ExtracellularContext",
-        "AnalyticalExtracellularContext",
-        "ExtracellularStimulationContext",
-        "NRVExtracellularContext",
-    ):
-        assert not hasattr(__import__("axonscope"), legacy_name)
-        assert not hasattr(__import__("axonscope").stimulation, legacy_name)
-    assert isinstance(
-        IntracellularCurrentClamp(position=0.0 * um, current=Stimulus.constant(0.0)),
-        IntracellularContext,
-    )
-    root = __import__("axonscope")
-    assert not hasattr(root, "simulate")
-    assert not hasattr(root, "simulate_pool")
-    assert not hasattr(root, "estimate_simulation")
-    assert not hasattr(root, "inspect_simulation")
-    assert isinstance(signals.MEMBRANE_VOLTAGE, Signal)
+    assert isinstance(signals.MEMBRANE_VOLTAGE, signals.Signal)
     assert signals.Vm is signals.MEMBRANE_VOLTAGE
-    assert signals.MEMBRANE_VOLTAGE.id == SignalId("membrane_voltage")
+    assert signals.MEMBRANE_VOLTAGE.id == identifiers.SignalId("membrane_voltage")
     assert signals.MEMBRANE_VOLTAGE.result_key == "Vm"
-    assert not hasattr(Signal, "VM")
-    assert RecordingSpatial.CENTER is not None
-    assert RecordingPlan is not None
-    assert not hasattr(analytical, "local_point_source_context")
+    assert recording.RecordingSpatial.CENTER is not None
+    assert recording.RecordingPlan is not None
     assert positions.PROXIMAL is not None
-    assert hasattr(__import__("axonscope").positions, "DISTAL")
+    assert hasattr(__import__("axonfleet").positions, "DISTAL")
     assert AxonInstance is not None
     assert AxonPopulation is not None
     assert AxonSimulation is not AxonInstance
     assert BatchOptions.full().recording.is_full
-    assert BatchRecording.center().label == "center"
-    assert BenchmarkReport is not None
-    assert BenchmarkSession is not None
-    assert (
-        runtime.jax.SingleCableSolver.jax_tridiagonal().kind
-        is runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
-    )
+    assert solvers.BatchRecording.center().label == "center"
+    assert benchmarking.BenchmarkReport is not None
+    assert benchmarking.BenchmarkSession is not None
     assert (
         runtime.jax.cpu.DoubleCableSolver.thomas().kind
         is runtime.jax.DoubleCableSolverKind.THOMAS
     )
-    assert AssemblyDetailInspection is not None
-    assert DispatchGroupInspection is not None
-    assert KernelInspection is not None
-    assert LoweringInspection is not None
-    assert MemoryInspection is not None
-    assert MembraneSourceInspection is not None
-    assert PaddingInspection is not None
+    assert inspection.AssemblyDetailInspection is not None
+    assert inspection.DispatchGroupInspection is not None
+    assert inspection.KernelInspection is not None
+    assert inspection.LoweringInspection is not None
+    assert inspection.MemoryInspection is not None
+    assert inspection.MembraneSourceInspection is not None
+    assert inspection.PaddingInspection is not None
     assert Device.auto().kind == "auto"
     assert ExecutionPolicy(device=Device.cpu()).device == Device.cpu()
     assert (
         runtime.jax.gpu.DoubleCableSolver.tiled_thomas().kind
         is runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     )
-    assert MemoryEstimateItem is not None
+    assert performance.MemoryEstimateItem is not None
     assert PrecisionPolicy.float32().solver_dtype == "float32"
-    assert ProbeInspection is not None
-    assert ResultAssemblyInspection is not None
+    assert inspection.ProbeInspection is not None
+    assert inspection.ResultAssemblyInspection is not None
     assert runtime.auto.value == "auto"
     assert runtime.jax.value == "jax"
-    assert runtime.numpy.value == "numpy"
-    assert SimulationEstimate is not None
-    assert SimulationEstimateGroup is not None
+    assert performance.SimulationEstimate is not None
+    assert performance.SimulationEstimateGroup is not None
     assert SimulationInspection is not None
-    assert SolverPolicy(
-        single_cable=runtime.jax.SingleCableSolver.auto(),
-        double_cable=runtime.jax.DoubleCableSolver.auto(),
-    ) is not None
+    assert SolverPolicy(double_cable=runtime.jax.DoubleCableSolver.auto()) is not None
     assert runtime.jax.TiledThomasSolverOptions(block_b=32).block_b == 32
     assert VM_RASTER_OBSERVATION_KEY == "vm_raster"
     assert VmRasterResult is not None
@@ -159,30 +105,13 @@ def test_public_package_imports_are_available():
     assert disable_benchmark is not None
     assert enable_benchmark is not None
     assert reset_benchmark is not None
-    assert preparation.extracellular_stimulation_signature is not None
-    assert membranes.GeneratedCodeFileInspection is not None
-    assert membranes.GeneratedMembraneCodeInspection is not None
-    assert membranes.GeneratedMembraneCodeReport is not None
-    assert membranes.GeneratedTargetExplanation is not None
-    assert membranes.MembraneComponentExplanation is not None
-    assert membranes.MembraneEquationDependency is not None
-    assert membranes.MembraneModelExplanation is not None
-    assert membranes.MembraneRecordingOutputExplanation is not None
-    assert membranes.MembraneSourceExplanation is not None
-    assert membranes.MembraneSourceSection is not None
-    assert membranes.MembraneSourceSymbol is not None
-    assert membranes.MembraneStateUpdateExplanation is not None
-    assert membranes.MembraneStepExplanation is not None
     assert membranes.explain is not None
     assert membranes.inspect_generated_code is not None
-    assert not hasattr(membranes, "MembraneModel")
-    assert not hasattr(membranes, "ensure_membrane_model")
     assert issubclass(membranes.HodgkinHuxley, membranes.Model)
-    hh_membrane = membranes.HodgkinHuxley(celsius=6.3 * __import__("axonscope").degC)
+    hh_membrane = membranes.HodgkinHuxley(celsius=6.3 * __import__("axonfleet").degC)
     assert isinstance(hh_membrane, membranes.Model)
     assert hh_membrane.kind == "hodgkin_huxley"
     assert hh_membrane.params["celsius"] == 6.3
     assert HodgkinHuxley is not None
     assert RattayAberham is not None
     assert MRG is not None
-    assert mrg_like_length_from_nodes(10.0 * um, 3) > 0.0

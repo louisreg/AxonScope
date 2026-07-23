@@ -11,7 +11,7 @@ names.
 
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -33,7 +33,7 @@ def main() -> None:
         }
     )
 
-    # If the same model kind appears twice in a sequence, AxonScope refuses to
+    # If the same model kind appears twice in a sequence, AxonFleet refuses to
     # invent arbitrary suffixes. Use a labelled mapping instead.
     try:
         axs.membranes.Composite([axs.membranes.Passive(), axs.membranes.Passive()])

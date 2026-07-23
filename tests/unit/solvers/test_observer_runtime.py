@@ -5,11 +5,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.runtime.jax.recording import lowering as recording_lowering
-from axonscope.positions import ALL, CENTER, DISTAL, Indices
-from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
-from axonscope.runtime.jax.recording.observer import (
+import axonfleet as axs
+from axonfleet.runtime.jax.recording import lowering as recording_lowering
+from axonfleet.positions import ALL, CENTER, DISTAL, Indices
+from axonfleet.results import VM_RASTER_OBSERVATION_KEY
+from axonfleet.results.vm_raster import unpack_vm_raster_words
+from axonfleet.runtime.jax.recording.observer import (
     build_threshold_observer_plan,
     combine_threshold_observer_chunk_states,
     finalize_threshold_observer_state,
@@ -361,8 +362,6 @@ def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypa
             ],
             dtype=float,
         ),
-        axon_y_um=np.asarray([0.0, 10.0], dtype=float),
-        axon_z_um=np.asarray([50.0, 60.0], dtype=float),
         spatial_cache_token=spatial_cache_token,
     )
     observers = (
@@ -377,7 +376,6 @@ def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypa
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_threshold_observer=True,
     )
     refreshed = SimpleNamespace(
         **{
@@ -395,7 +393,6 @@ def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypa
         observers,
         cohort=refreshed,
         dtype=np.float32,
-        prefer_threshold_observer=True,
     )
 
     assert first is second
@@ -424,8 +421,6 @@ def test_threshold_observer_plan_identity_cache_reuses_same_prepared_cohort(monk
             ],
             dtype=float,
         ),
-        axon_y_um=np.asarray([0.0, 10.0], dtype=float),
-        axon_z_um=np.asarray([50.0, 60.0], dtype=float),
     )
     observers = (
         axs.analysis.Activation(
@@ -439,7 +434,6 @@ def test_threshold_observer_plan_identity_cache_reuses_same_prepared_cohort(monk
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_threshold_observer=True,
     )
 
     def fail_digest(_values):
@@ -451,7 +445,6 @@ def test_threshold_observer_plan_identity_cache_reuses_same_prepared_cohort(monk
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_threshold_observer=True,
     )
 
     assert second is first

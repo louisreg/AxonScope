@@ -7,7 +7,7 @@ Run:
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -33,7 +33,7 @@ def main() -> None:
         amplitude=-50.0 * axs.uA,
     )
 
-    # Build the pool explicitly so it is clear what AxonScope receives:
+    # Build the pool explicitly so it is clear what AxonFleet receives:
     # a sequence of local AxonInstance rows, not a geometry object.
     simulations = []
     for index, y_position in enumerate(y_positions):

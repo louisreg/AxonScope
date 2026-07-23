@@ -23,7 +23,7 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import axonscope as axs
+import axonfleet as axs
 from benchmark.analysis.cache_replay import (
     cache_tree_delta,
     cache_tree_snapshot,
@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = args.output / "summary.json"
     summary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(payload, indent=2))
-    print(f"AxonScope membrane temporal results: {args.output}")
+    print(f"AxonFleet membrane temporal results: {args.output}")
     return 0
 
 
@@ -338,12 +338,12 @@ def _result_checksum(result) -> str:
 def _force_jax_membrane_reference() -> None:
     """Disable optional generated kernels inside this benchmark process."""
 
-    if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
+    if os.environ.get("AXONFLEET_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
         raise SystemExit(
             "--membrane-route jax conflicts with "
-            "AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE=1."
+            "AXONFLEET_REQUIRE_GENERATED_TRITON_MEMBRANE=1."
         )
-    from axonscope.runtime.jax.membranes.backend import (
+    from axonfleet.runtime.jax.membranes.backend import (
         GatedLeakStackMembraneBackend,
         UniformMembraneBackend,
     )
@@ -370,7 +370,8 @@ def _run_compilation_cache_replay(
     records = []
     for case in cases:
         case_output = args.output / case.name
-        cache_root = case_output / "jax_xla_cache"
+        cache_root = case_output / "persistent_cache"
+        xla_cache_root = cache_root / "runtime" / "jax" / "xla"
         if cache_root.exists() and any(cache_root.iterdir()):
             raise SystemExit(
                 "--compilation-cache-replay requires fresh per-case cache roots; "
@@ -383,12 +384,12 @@ def _run_compilation_cache_replay(
             ("dynamic_v_init_replay", args.v_init_mv + 0.5),
         ):
             child_output = case_output / label
-            before = cache_tree_snapshot(cache_root)
+            before = cache_tree_snapshot(xla_cache_root)
             environment = os.environ.copy()
-            environment["AXONSCOPE_JAX_COMPILATION_CACHE"] = str(cache_root)
-            environment["AXONSCOPE_JAX_CACHE_MIN_COMPILE_TIME_S"] = "0"
-            environment["AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] = "-1"
-            environment["AXONSCOPE_JAX_PERSISTENT_XLA_CACHES"] = "all"
+            environment["AXONFLEET_CACHE"] = str(cache_root)
+            environment["AXONFLEET_JAX_CACHE_MIN_COMPILE_TIME_S"] = "0"
+            environment["AXONFLEET_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] = "-1"
+            environment["AXONFLEET_JAX_PERSISTENT_XLA_CACHES"] = "all"
             environment["JAX_EXPLAIN_CACHE_MISSES"] = "true"
             environment["MPLCONFIGDIR"] = str(child_output / ".matplotlib")
             command = _cache_replay_child_command(
@@ -422,7 +423,7 @@ def _run_compilation_cache_replay(
             )
             record["jax_xla_cache"] = cache_tree_delta(
                 before,
-                cache_tree_snapshot(cache_root),
+                cache_tree_snapshot(xla_cache_root),
             )
             processes.append(record)
 

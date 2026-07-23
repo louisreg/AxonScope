@@ -3,15 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.preparation.axon_rows import MaterializedAxonRows
-from axonscope.runtime.host_preparation import (
+import axonfleet as axs
+from axonfleet.preparation.axon_rows import MaterializedAxonRows
+from axonfleet.runtime.host_preparation import (
     cable_runtime_rows_numpy,
     compartment_area_cm2_numpy,
     diffusion_operator_coeffs_numpy,
     pad_space_array_numpy,
 )
-from axonscope.runtime.solver_axon import build_solver_axon
+from axonfleet.runtime.solver_axon import build_solver_axon
 
 
 def test_materialized_rows_deduplicate_shared_descriptions():
@@ -155,30 +155,6 @@ def test_materialized_rows_do_not_share_mrg_phase_shifts():
     assert rows.template_count == 2
     np.testing.assert_array_equal(rows.row_template_indices, [0, 1])
     np.testing.assert_array_equal(rows.row_x_shifts_um, [0.0, 0.0])
-
-
-def test_materialized_rows_do_not_share_translations_with_cable_overrides():
-    base = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
-    translated = axs.axons.Axon(
-        layout=base.layout.with_x_shift(25.0 * axs.um),
-        formulation=base.formulation,
-        diameter=base.diameter * axs.um,
-    )
-    base_instance = axs.AxonInstance(base)
-    translated_instance = axs.AxonInstance(translated)
-    translated_instance.set_extracellular_layer(
-        xg_S_per_cm2=np.full((translated.n_compartments,), 1e-3),
-    )
-
-    rows = MaterializedAxonRows.from_solver_axons(
-        (
-            build_solver_axon(base_instance),
-            build_solver_axon(translated_instance),
-        )
-    )
-
-    assert rows.template_count == 2
-    assert rows.translated_row_count == 0
 
 
 def test_materialized_rows_reject_too_small_target_width():

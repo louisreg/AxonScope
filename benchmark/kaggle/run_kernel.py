@@ -1,4 +1,4 @@
-"""Submit AxonScope benchmark scripts and campaigns to Kaggle."""
+"""Submit AxonFleet benchmark scripts and campaigns to Kaggle."""
 
 from __future__ import annotations
 
@@ -24,16 +24,14 @@ from benchmark.workloads.curve_options import PRESETS
 KAGGLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = KAGGLE_DIR.parents[1]
 KERNEL_ENTRY = KAGGLE_DIR / "kernel_entry.py"
-DEFAULT_REPO_URL = "https://github.com/louisreg/AxonScope.git"
-DEFAULT_SLUG = "axonscope-p11a-benchmarks"
+DEFAULT_REPO_URL = "https://github.com/louisreg/AxonFleet.git"
+DEFAULT_SLUG = "axonfleet-benchmarks"
 DEFAULT_TITLE = None
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
 TIME_CHUNK_SWEEP_CAMPAIGN = "time_chunk_sweep"
 DOUBLE_CABLE_SOLVER_POLICY_CAMPAIGN = "double_cable_solver_policy"
-SINGLE_CABLE_SOLVER_POLICY_CAMPAIGN = "single_cable_solver_policy"
 STANDALONE_CAMPAIGNS = (
     DOUBLE_CABLE_SOLVER_POLICY_CAMPAIGN,
-    SINGLE_CABLE_SOLVER_POLICY_CAMPAIGN,
 )
 CAMPAIGNS = (TIME_CHUNK_SWEEP_CAMPAIGN, *STANDALONE_CAMPAIGNS)
 
@@ -104,7 +102,7 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         help=(
             "Kaggle accelerator shape. Omit it for the default P100 GPU run, "
             "use cpu/no-accelerator for a CPU-only Kaggle run, or combine "
-            "--platform cpu with a GPU shape to run AxonScope's CPU path on a "
+            "--platform cpu with a GPU shape to run AxonFleet's CPU path on a "
             "Kaggle GPU machine."
         ),
     )
@@ -130,11 +128,6 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--attach", action="store_true")
     parser.add_argument("--no-download", action="store_true")
     parser.add_argument("--no-require-gpu", action="store_true")
-    parser.add_argument(
-        "--jax-cuda-extra",
-        default="cuda12",
-        help="Optional JAX CUDA extra installed in Kaggle; use '' to skip.",
-    )
     parser.add_argument(
         "--pip-package",
         action="append",
@@ -173,7 +166,7 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     )
     parser.add_argument(
         "--output-file-pattern",
-        default=".*axonscope_benchmark_results.*",
+        default=".*axonfleet_benchmark_results.*",
         help="Regex passed to `kaggle kernels output --file-pattern`.",
     )
     raw_args = list(argv) if argv is not None else sys.argv[1:]
@@ -257,13 +250,6 @@ def prepare_kernel_package(
     run_id = make_run_id(args)
     require_gpu = bool(not args.no_require_gpu and args.platform == "gpu")
     pip_packages = list(args.pip_package or ())
-    requested_pip_names = {
-        str(package).split("==", 1)[0] for package in pip_packages
-    }
-    if require_gpu:
-        for package in ("triton", "jax-triton"):
-            if package not in requested_pip_names:
-                pip_packages.append(package)
     config = {
         "campaign": args.campaign,
         "repo_url": args.repo_url,
@@ -274,7 +260,7 @@ def prepare_kernel_package(
         "benchmark_args": benchmark_args,
         "run_id": run_id,
         "require_gpu": require_gpu,
-        "jax_cuda_extra": args.jax_cuda_extra,
+        "install_target": ".[benchmark,cuda12]" if require_gpu else ".[benchmark]",
         "apt_packages": list(args.apt_package or ()),
         "nrv_conda_env": bool(args.nrv_conda_env),
         "pip_packages": pip_packages,
@@ -283,7 +269,7 @@ def prepare_kernel_package(
     metadata: dict[str, Any] = {
         "id": f"{args.username}/{args.slug}",
         "title": args.title or args.slug,
-        "code_file": "axonscope_benchmark_kernel.py",
+        "code_file": "axonfleet_benchmark_kernel.py",
         "language": "python",
         "kernel_type": "script",
         "is_private": "true",
@@ -300,7 +286,7 @@ def prepare_kernel_package(
     write_json(package_dir / "kernel-metadata.json", metadata)
     write_json(package_dir / "kaggle_config.json", config)
     write_text(
-        package_dir / "axonscope_benchmark_kernel.py",
+        package_dir / "axonfleet_benchmark_kernel.py",
         render_kernel_entry(config),
     )
     write_json(

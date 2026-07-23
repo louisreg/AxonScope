@@ -21,8 +21,11 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.linalg import expm
 
-import axonscope as axs
-from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+import axonfleet as axs
+from axonfleet.runtime.jax.membranes.compile import compile_membrane_model
+from axonfleet.runtime.jax.membranes.generated_contract import (
+    MEMBRANE_RUNTIME_CONTRACT_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -65,7 +68,7 @@ def build_transition_table(
     operators = operators.astype(target_dtype)
     stationary = np.asarray(membrane.init_gates(jnp.asarray(voltages))).astype(target_dtype)
     key_payload = {
-        "runtime_contract_version": contract.version,
+        "runtime_contract_version": MEMBRANE_RUNTIME_CONTRACT_VERSION,
         "structural_hash": contract.structural_hash,
         "parameterized_hash": contract.parameterized_hash,
         "model": contract.model_name,

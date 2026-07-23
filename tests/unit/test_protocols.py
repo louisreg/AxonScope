@@ -5,13 +5,14 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import axonscope as axs
-import axonscope.protocols.recruitment as recruitment_protocols
-from axonscope.protocols import observer_path as observer_protocols
-from axonscope.protocols import sweep as sweep_protocols
-from axonscope.protocols import threshold as threshold_protocols
-from axonscope.results import VM_RASTER_OBSERVATION_KEY, VmRasterResult
-from axonscope.results.pool import _ResultBlock
+import axonfleet as axs
+import axonfleet.protocols.recruitment as recruitment_protocols
+from axonfleet.protocols import observer_path as observer_protocols
+from axonfleet.protocols import sweep as sweep_protocols
+from axonfleet.protocols import threshold as threshold_protocols
+from axonfleet.results import VM_RASTER_OBSERVATION_KEY, VmRasterResult
+from axonfleet.results.pool import _ResultBlock
+from axonfleet.results.vm_raster import activation_values_from_vm_raster
 
 
 class _DummyLayout:
@@ -25,7 +26,7 @@ class _DummyAxon:
 
 
 def _result_for_current(electrode_current, *, threshold_nA=1.0):
-    amp_nA = axs.units.to_nA(electrode_current)
+    amp_nA = axs.units.to_scalar(electrode_current, "nanoampere")
     t = np.asarray([0.0, 1.0, 2.0])
     vm = np.full((3, 2), -70.0)
     if amp_nA >= threshold_nA:
@@ -48,7 +49,7 @@ def _public_pool_result(vms, *, axons=None):
         diagnostics=tuple({} for _ in range(row_count)),
         record_indices=tuple(None for _ in range(row_count)),
     )
-    return axs.AxonSimulationResult((cohort,), size=row_count)
+    return axs.results.AxonSimulationResult((cohort,), size=row_count)
 
 
 def _observer_only_pool_result(activated):
@@ -80,7 +81,7 @@ def _observer_only_pool_result(activated):
         record_indices=tuple(None for _ in range(row_count)),
         observations={VM_RASTER_OBSERVATION_KEY: raster},
     )
-    return axs.AxonSimulationResult((cohort,), size=row_count)
+    return axs.results.AxonSimulationResult((cohort,), size=row_count)
 
 
 def _observer_only_cohort(activated, *, input_indices):
@@ -278,7 +279,7 @@ def test_recruitment_reuses_one_observer_simulation_for_typed_waveform(monkeypat
         values=np.asarray([1.0, 2.0, 3.0]) * axs.uA,
         duration=1.0 * axs.ms,
         dt=0.1 * axs.ms,
-        criterion=axs.analysis.ActivationCriterion(),
+        criterion=axs.analysis.Activation(),
         recording=axs.Recording.none(),
     )
 
@@ -308,13 +309,13 @@ def test_vm_raster_shared_activation_decoder_respects_blanking_and_probe_mask():
         positions_um=np.asarray([[0.0, np.nan], [0.0, 100.0]], dtype=float),
         thresholds_mV=np.asarray([0.0, 0.0], dtype=float),
     )
-    activation = axs.Activation(
+    activation = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=1.5 * axs.ms,
         target=axs.positions.DISTAL,
         name="activation",
     )
-    early = axs.Activation(
+    early = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=1.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -322,7 +323,7 @@ def test_vm_raster_shared_activation_decoder_respects_blanking_and_probe_mask():
     )
 
     np.testing.assert_array_equal(
-        axs.results.activation_values_from_vm_raster(raster, activation),
+        activation_values_from_vm_raster(raster, activation),
         [True],
     )
     np.testing.assert_array_equal(
@@ -344,10 +345,10 @@ def test_vm_raster_shared_activation_decoder_reports_missing_definition():
         positions_um=np.asarray([[100.0]], dtype=float),
         thresholds_mV=np.asarray([0.0], dtype=float),
     )
-    activation = axs.Activation(name="activation")
+    activation = axs.analysis.Activation(name="activation")
 
     with pytest.raises(RuntimeError, match="missing from VmRaster"):
-        axs.results.activation_values_from_vm_raster(raster, activation)
+        activation_values_from_vm_raster(raster, activation)
 
 
 def test_vm_raster_activation_decoder_ignores_bits_outside_nt():
@@ -363,10 +364,10 @@ def test_vm_raster_activation_decoder_ignores_bits_outside_nt():
         positions_um=np.asarray([[0.0]], dtype=float),
         thresholds_mV=np.asarray([0.0], dtype=float),
     )
-    activation = axs.Activation(name="activation")
+    activation = axs.analysis.Activation(name="activation")
 
     np.testing.assert_array_equal(
-        axs.results.activation_values_from_vm_raster(raster, activation),
+        activation_values_from_vm_raster(raster, activation),
         [False],
     )
 
@@ -384,10 +385,10 @@ def test_vm_raster_activation_decoder_ignores_extra_words_outside_nt():
         positions_um=np.asarray([[0.0]], dtype=float),
         thresholds_mV=np.asarray([0.0], dtype=float),
     )
-    activation = axs.Activation(name="activation")
+    activation = axs.analysis.Activation(name="activation")
 
     np.testing.assert_array_equal(
-        axs.results.activation_values_from_vm_raster(raster, activation),
+        activation_values_from_vm_raster(raster, activation),
         [False],
     )
 
@@ -405,83 +406,19 @@ def test_vm_raster_activation_decoder_supports_device_words():
         positions_um=np.asarray([[0.0]], dtype=float),
         thresholds_mV=np.asarray([0.0], dtype=float),
     )
-    activation = axs.Activation(name="activation")
+    activation = axs.analysis.Activation(name="activation")
 
     np.testing.assert_array_equal(
-        axs.results.activation_values_from_vm_raster(raster, activation),
+        activation_values_from_vm_raster(raster, activation),
         [True, False],
     )
 
 
-def test_find_activation_threshold_accepts_simulation_factory(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
-        threshold=0.0 * axs.mV,
-        blanking=0.5 * axs.ms,
-        target=axs.positions.DISTAL,
-    )
-    calls = []
-
-    def factory(tested_current):
-        candidate = _DummyAxon()
-        candidate.tested_current = tested_current
-        return candidate
-
-    def fake_simulate(candidate, **kwargs):
-        calls.append(kwargs)
-        return _result_for_current(candidate.tested_current, threshold_nA=1.0)
-
-    _patch_simulation_runner(monkeypatch, fake_simulate)
-
-    threshold = axs.protocols.find_activation_threshold(
-        factory,
-        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        tolerance=0.25 * axs.nA,
-    )
-
-    assert threshold.status == "threshold"
-    assert threshold.amplitude is not None
-    assert 1.0 <= threshold.amplitude.to(axs.nA).magnitude <= 1.25
-    assert threshold.n_iterations >= 3
-    assert calls
-
-
-def test_find_activation_threshold_requires_current_units():
-    criterion = axs.analysis.ActivationCriterion(
-        threshold=0.0 * axs.mV,
-        blanking=0.5 * axs.ms,
-        target=axs.positions.DISTAL,
-    )
-
-    with pytest.raises(TypeError, match="bounds\\[0\\] must include units compatible with current"):
-        axs.protocols.find_activation_threshold(
-            lambda tested_current: _result_for_current(tested_current),
-            bounds=(0.0, 2.0 * axs.nA),
-            duration=2.0 * axs.ms,
-            dt=1.0 * axs.ms,
-            criterion=criterion,
-            tolerance=0.25 * axs.nA,
-        )
-
-    with pytest.raises(TypeError, match="tolerance must include units compatible with current"):
-        axs.protocols.find_activation_threshold(
-            lambda tested_current: _result_for_current(tested_current),
-            bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-            duration=2.0 * axs.ms,
-            dt=1.0 * axs.ms,
-            criterion=criterion,
-            tolerance=0.25,
-        )
-
-
 def test_recruitment_sweep_accepts_pool_update(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
-        require_propagation=True,
     )
     tested_values_nA: list[float] = []
     pool = (_DummyAxon(), _DummyAxon())
@@ -515,6 +452,7 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
         criterion=criterion,
+        recording=axs.Recording.voltage(),
         solver_progress="plain",
     )
 
@@ -528,15 +466,15 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
     first_activation = curve.to_analysis_result()
     np.testing.assert_allclose(first_activation.values * 1000.0, [1.0, 2.0])
     assert first_activation.statuses == (
-        axs.AnalysisStatus.VALID,
-        axs.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
     )
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
     assert progress_values == ["plain", False, False]
 
 
 def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -584,7 +522,7 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
 
 
 def test_recruitment_sweep_keeps_axoninstance_observer_values_sequential(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -642,7 +580,7 @@ def test_recruitment_sweep_keeps_axoninstance_observer_values_sequential(monkeyp
 
 
 def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -694,7 +632,7 @@ def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypat
 
 
 def test_recruitment_sweep_rejects_opaque_batched_update():
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -727,7 +665,7 @@ def test_recruitment_sweep_rejects_opaque_batched_update():
 
 
 def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -837,7 +775,7 @@ def test_recruitment_numeric_waveform_axis_matches_single_value_chunks():
         "values": values,
         "duration": 0.6 * axs.ms,
         "dt": 0.05 * axs.ms,
-        "criterion": axs.analysis.ActivationCriterion(
+        "criterion": axs.analysis.Activation(
             threshold=0.0 * axs.mV,
             blanking=0.2 * axs.ms,
             target=axs.positions.ALL,
@@ -898,7 +836,7 @@ def test_recruitment_numeric_axis_matches_single_chunks_with_multiple_drives():
         "values": np.asarray([0.0, 1.0, 2.0]) * axs.uA,
         "duration": 0.6 * axs.ms,
         "dt": 0.05 * axs.ms,
-        "criterion": axs.analysis.ActivationCriterion(
+        "criterion": axs.analysis.Activation(
             threshold=0.0 * axs.mV,
             blanking=0.2 * axs.ms,
             target=axs.positions.ALL,
@@ -969,7 +907,7 @@ def test_recruitment_double_cable_numeric_axis_supports_multiple_drives():
         "values": np.asarray([0.0, 1.0]) * axs.uA,
         "duration": 0.3 * axs.ms,
         "dt": 0.05 * axs.ms,
-        "criterion": axs.analysis.ActivationCriterion(
+        "criterion": axs.analysis.Activation(
             threshold=0.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.ALL,
@@ -992,7 +930,7 @@ def test_recruitment_double_cable_numeric_axis_supports_multiple_drives():
 
 
 def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -1055,14 +993,14 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
 
 
 def test_activation_observer_pool_result_uses_cohort_vector_path():
-    result = axs.AxonSimulationResult(
+    result = axs.results.AxonSimulationResult(
         (
             _observer_only_cohort((True, False), input_indices=(2, 0)),
             _observer_only_cohort((True,), input_indices=(1,)),
         ),
         size=3,
     )
-    activation = axs.Activation(
+    activation = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -1078,7 +1016,7 @@ def test_activation_observer_pool_result_uses_cohort_vector_path():
 
 
 def test_recruitment_sweep_requires_current_units():
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -1213,11 +1151,10 @@ def test_pool_sweep_solver_progress_is_first_run_only(monkeypatch, capsys):
 
 
 def test_find_threshold_accepts_mutating_or_replacing_update(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
-        require_propagation=True,
     )
     thresholds_nA = np.asarray([0.5, 1.5], dtype=float)
     rows = np.asarray([0.5, 1.5]) * axs.um
@@ -1252,6 +1189,7 @@ def test_find_threshold_accepts_mutating_or_replacing_update(monkeypatch):
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
         criterion=criterion,
+        recording=axs.Recording.voltage(),
         tolerance=0.25 * axs.nA,
         max_iterations=8,
     )
@@ -1264,11 +1202,10 @@ def test_find_threshold_accepts_mutating_or_replacing_update(monkeypatch):
 
 
 def test_threshold_curve_solver_progress_is_first_run_only(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
-        require_propagation=True,
     )
     progress_values: list[bool | str] = []
     thresholds_nA = np.asarray([0.5, 1.5], dtype=float)
@@ -1299,6 +1236,7 @@ def test_threshold_curve_solver_progress_is_first_run_only(monkeypatch):
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
         criterion=criterion,
+        recording=axs.Recording.voltage(),
         tolerance=0.25 * axs.nA,
         max_iterations=8,
         solver_progress="plain",
@@ -1325,7 +1263,8 @@ def test_find_threshold_uses_activation_observer_only_path(monkeypatch):
     def fake_simulation_runner(updated_pool, **kwargs):
         calls.append(kwargs)
         flags = [
-            axs.units.to_nA(row.tested_current) >= thresholds_nA[pool.index(row)]
+            axs.units.to_scalar(row.tested_current, "nanoampere")
+            >= thresholds_nA[pool.index(row)]
             for row in updated_pool
         ]
         return _observer_only_pool_result(flags)
@@ -1355,7 +1294,7 @@ def test_find_threshold_uses_activation_observer_only_path(monkeypatch):
 
 
 def test_find_threshold_requires_current_units():
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -1374,11 +1313,10 @@ def test_find_threshold_requires_current_units():
 
 
 def test_find_threshold_accepts_callable_bounds_and_relative_tolerance(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
-        require_propagation=True,
     )
     rows = ("low", "high")
     pool = tuple(_DummyAxon() for _ in rows)
@@ -1414,6 +1352,7 @@ def test_find_threshold_accepts_callable_bounds_and_relative_tolerance(monkeypat
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
         criterion=criterion,
+        recording=axs.Recording.voltage(),
         tolerance=None,
         relative_tolerance=0.1,
         max_iterations=12,
@@ -1423,79 +1362,12 @@ def test_find_threshold_accepts_callable_bounds_and_relative_tolerance(monkeypat
     np.testing.assert_allclose(curve.threshold_uA * 1000.0, [1.0, 4.0], rtol=0.1)
 
 
-def test_protocol_threshold_search_result_views(capsys):
-    history = (
-        axs.protocols.ThresholdHistoryEntry(
-            amplitude_uA=5.0,
-            activated=False,
-            event=axs.analysis.ActivationEvent(
-                activated=False,
-                peak_mV=-35.0,
-                peak_time_ms=0.4,
-                peak_index=12,
-            ),
-        ),
-        axs.protocols.ThresholdHistoryEntry(
-            amplitude_uA=10.0,
-            activated=True,
-            event=axs.analysis.ActivationEvent(
-                activated=True,
-                first_time_ms=0.6,
-                first_position_um=100.0,
-                first_index=1,
-                peak_mV=15.0,
-                peak_time_ms=0.7,
-                peak_index=2,
-            ),
-        ),
-    )
-    result = axs.protocols.ThresholdSearchResult(
-        amplitude_uA=7.5,
-        lower_bound_uA=5.0,
-        upper_bound_uA=10.0,
-        status="threshold",
-        history=history,
-    )
-
-    rows = axs.protocols.views.threshold_search_rows(result, unit=axs.uA)
-    assert result.rows(unit=axs.uA) == rows
-    assert rows[0]["amplitude"] == 5.0
-    assert rows[1]["activated"] is True
-    dataframe = result.to_dataframe(unit=axs.uA)
-    assert list(dataframe.columns) == [
-        "iteration",
-        "amplitude",
-        "activated",
-        "first_time_ms",
-        "first_position_um",
-        "peak_mV",
-    ]
-    assert "amplitude=7.5" in result.format(unit=axs.uA)
-    threshold_metric = result.to_analysis_result()
-    assert threshold_metric.name == "threshold"
-    assert threshold_metric.value == pytest.approx(7.5)
-    assert threshold_metric.status is axs.AnalysisStatus.VALID
-
-    result.print(unit=axs.uA)
-    assert "AxonScope threshold search" in capsys.readouterr().out
-
-    import matplotlib.pyplot as plt
-
-    ax = result.plot(unit=axs.uA)
-    assert ax.get_xlabel().startswith("Amplitude [")
-    plt.close(ax.figure)
-
-
 def test_protocol_threshold_status_vocabulary_is_not_analysis_status():
     threshold_statuses = set(get_args(axs.protocols.ThresholdStatus))
-    analysis_statuses = {status.value for status in axs.AnalysisStatus}
+    analysis_statuses = {status.value for status in axs.analysis.AnalysisStatus}
 
     assert threshold_statuses == {"threshold", "below_range", "above_range"}
     assert threshold_statuses.isdisjoint(analysis_statuses)
-    assert "find_threshold" in (axs.protocols.ThresholdSearchResult.__doc__ or "")
-    assert "find_activation_threshold" not in (
-        axs.protocols.ThresholdSearchResult.__doc__ or ""
-    )
 
 
 def test_protocol_recruitment_pool_and_threshold_curve_views(capsys):
@@ -1516,8 +1388,8 @@ def test_protocol_recruitment_pool_and_threshold_curve_views(capsys):
     assert first_activation.row_labels == ("a", "b")
     np.testing.assert_allclose(first_activation.values, [10.0, 20.0])
     assert first_activation.statuses == (
-        axs.AnalysisStatus.VALID,
-        axs.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
     )
 
     sweep = axs.protocols.PoolSweepResult(
@@ -1572,8 +1444,8 @@ def test_protocol_recruitment_pool_and_threshold_curve_views(capsys):
     assert threshold_metric.row_labels == curve.row_labels
     np.testing.assert_allclose(threshold_metric.values, [12.0, 8.0])
     assert threshold_metric.statuses == (
-        axs.AnalysisStatus.VALID,
-        axs.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
     )
     assert "diameter_um=0.5" in curve.format(
         row_name="diameter_um",
@@ -1582,7 +1454,7 @@ def test_protocol_recruitment_pool_and_threshold_curve_views(capsys):
     )
 
     curve.print(row_name="diameter_um", row_unit=axs.um, threshold_unit=axs.uA)
-    assert "AxonScope threshold curve" in capsys.readouterr().out
+    assert "AxonFleet threshold curve" in capsys.readouterr().out
 
     import matplotlib.pyplot as plt
 

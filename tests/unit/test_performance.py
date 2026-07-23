@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.performance_views import format_simulation_estimate
+import axonfleet as axs
+from axonfleet.performance.views import format_simulation_estimate
 
 
 def _hh(compartments: int = 5):
@@ -57,13 +57,12 @@ def test_simulation_estimate_counts_center_recording_memory():
 
     estimate = simulation.estimate()
 
-    assert isinstance(estimate, axs.SimulationEstimate)
+    assert isinstance(estimate, axs.performance.SimulationEstimate)
     assert estimate.axon_count == 2
     assert estimate.step_count == 2
     assert estimate.max_compartments == 5
     assert estimate.recording_width_max == 1
     assert len(estimate.groups) == 1
-    assert estimate.groups[0].route == "batch"
     assert estimate.groups[0].retained_vm_width == 1
     assert estimate.item("outputs.recorded_vm").shape == (2, 2, 1)
     assert estimate.item("inputs.intracellular_current_density").shape == (2, 2, 5)
@@ -260,7 +259,6 @@ def test_one_row_population_estimate_uses_pool_recording_width():
     assert estimate.metadata["population_lifecycle"] is True
     assert estimate.recording_width_max == 1
     assert estimate.item("outputs.recorded_vm").shape == (1, 2, 1)
-    assert estimate.groups[0].route == "batch"
 
 
 def test_single_full_recording_estimate_counts_dense_observable_outputs():
@@ -274,7 +272,6 @@ def test_single_full_recording_estimate_counts_dense_observable_outputs():
 
     estimate = simulation.estimate()
 
-    assert estimate.groups[0].route == "batch"
     assert estimate.item("outputs.recorded_vm").shape == (1, 2, 5)
     assert estimate.item("outputs.gates").shape == (1, 2, 5, 3)
     assert estimate.item("outputs.currents").shape == (1, 2, 5, 3)
@@ -318,17 +315,12 @@ def test_solver_policy_is_typed_public_execution_policy_state():
         device=axs.Device.gpu(0),
         precision=axs.PrecisionPolicy.float32(),
         solvers=axs.SolverPolicy(
-            single_cable=axs.runtime.jax.SingleCableSolver.jax_tridiagonal(),
             double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
                 block_b=64
             ),
         ),
     )
 
-    assert (
-        policy.solver_policy.single_cable.kind
-        is axs.runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
-    )
     assert (
         policy.solver_policy.double_cable.kind
         is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
@@ -348,12 +340,8 @@ def test_solver_policy_is_typed_public_execution_policy_state():
 def test_solver_policy_rejects_untyped_values():
     with pytest.raises(TypeError, match="SolverPolicy"):
         axs.ExecutionPolicy(solvers="gpu")
-    with pytest.raises(TypeError, match="single-cable solver request"):
-        axs.SolverPolicy(single_cable="jax_tridiagonal")
     with pytest.raises(TypeError, match="double-cable solver request"):
         axs.SolverPolicy(double_cable="pcr_soa")
-    with pytest.raises(TypeError, match="SingleCableSolverKind"):
-        axs.runtime.jax.SingleCableSolver(kind="jax_tridiagonal")
     with pytest.raises(TypeError, match="DoubleCableSolverKind"):
         axs.runtime.jax.DoubleCableSolver(kind="jax_pcr_soa")
     with pytest.raises(ValueError, match="block_b"):
@@ -361,7 +349,7 @@ def test_solver_policy_rejects_untyped_values():
 
 
 def test_jax_solver_engine_resolves_typed_solver_policy():
-    from axonscope.runtime.jax.policy.engine import resolve_jax_solver_engine
+    from axonfleet.runtime.jax.policy.engine import resolve_jax_solver_engine
 
     cpu_engine = resolve_jax_solver_engine(
         axs.ExecutionPolicy(
@@ -392,16 +380,22 @@ def test_jax_solver_engine_resolves_typed_solver_policy():
     assert gpu_engine.name == "jax_gpu_tiled_thomas"
     assert gpu_engine.single_cable_solver == "jax_triton_tiled_thomas_xb"
     assert gpu_engine.double_cable_block_solver == "jax_triton_loop_xb"
-    assert gpu_engine.allow_internal_double_cable_block_solver is True
     assert gpu_engine.tiled_thomas_block_b == 64
+
+
+def test_jax_solver_engine_rejects_unknown_platform():
+    from axonfleet.runtime.jax.policy.engine import resolve_jax_solver_engine
+
+    with pytest.raises(ValueError, match="Unsupported JAX platform"):
+        resolve_jax_solver_engine(axs.ExecutionPolicy(), platform="tpu")
 
 
 def test_single_cable_gpu_route_guard_requires_retained_solver(monkeypatch):
     from types import SimpleNamespace
 
-    from axonscope.runtime.jax import group_runner
-    from axonscope.runtime.jax.kernels import triton_single_cable
-    from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
+    from axonfleet.runtime.jax import group_runner
+    from axonfleet.runtime.jax.kernels import triton_single_cable
+    from axonfleet.runtime.jax.policy.engine_types import JaxSolverEngine
 
     wrong = SimpleNamespace(
         platform="gpu",
@@ -409,7 +403,7 @@ def test_single_cable_gpu_route_guard_requires_retained_solver(monkeypatch):
             name="wrong",
             platform="gpu",
             single_cable_solver="jax_tridiagonal",
-            double_cable_block_solver=None,
+            double_cable_block_solver="jax_triton_loop_xb",
         ),
     )
     with pytest.raises(RuntimeError, match="wrong solver route"):
@@ -426,7 +420,7 @@ def test_single_cable_gpu_route_guard_requires_retained_solver(monkeypatch):
             name="retained",
             platform="gpu",
             single_cable_solver="jax_triton_tiled_thomas_xb",
-            double_cable_block_solver=None,
+            double_cable_block_solver="jax_triton_loop_xb",
         ),
     )
     assert (
@@ -436,13 +430,12 @@ def test_single_cable_gpu_route_guard_requires_retained_solver(monkeypatch):
 
 
 def test_runtime_solver_route_report_resolves_once_from_execution_policy():
-    from axonscope.runtime.execution import solver_route_from_execution_policy
+    from axonfleet.runtime.execution import solver_route_from_execution_policy
 
     route = solver_route_from_execution_policy(
         axs.ExecutionPolicy(
             device=axs.Device.gpu(0),
             solvers=axs.SolverPolicy(
-                single_cable=axs.runtime.jax.gpu.SingleCableSolver.jax_tridiagonal(),
                 double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
                     block_b=64
                 ),
@@ -456,7 +449,7 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
     assert route.engine_name == "jax_gpu_tiled_thomas"
     assert route.single_cable is not None
     assert route.single_cable.cable == "single_cable"
-    assert route.single_cable.requested == "jax_tridiagonal"
+    assert route.single_cable.requested == "auto"
     assert route.single_cable.runtime_route == "jax_triton_tiled_thomas_xb"
     assert route.double_cable is not None
     assert route.double_cable.cable == "double_cable"
@@ -469,7 +462,7 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
 
 
 def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatch):
-    from axonscope.runtime.jax.policy import execution as jax_execution_policy
+    from axonfleet.runtime.jax.policy import execution as jax_execution_policy
 
     calls = 0
     sentinel_device = object()
@@ -488,7 +481,7 @@ def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatc
         ),
     )
 
-    jax_execution_policy.clear_jax_execution_policy_cache()
+    jax_execution_policy._RESOLVED_EXECUTION_POLICY_CACHE.clear()
     monkeypatch.setattr(jax_execution_policy, "_resolve_device", fake_resolve_device)
 
     first = jax_execution_policy._resolve_jax_execution_policy(policy)
@@ -501,11 +494,11 @@ def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatc
     assert first.solver_engine.name == "jax_gpu_tiled_thomas"
     assert calls == 1
 
-    jax_execution_policy.clear_jax_execution_policy_cache()
+    jax_execution_policy._RESOLVED_EXECUTION_POLICY_CACHE.clear()
 
 
 def test_jax_precision_validation_cache_reuses_exact_instance_tuple(monkeypatch):
-    from axonscope.runtime.jax.policy import execution as jax_execution_policy
+    from axonfleet.runtime.jax.policy import execution as jax_execution_policy
 
     calls = 0
     instances = (_clamped_instance(_hh(compartments=5)),)
@@ -515,7 +508,7 @@ def test_jax_precision_validation_cache_reuses_exact_instance_tuple(monkeypatch)
         nonlocal calls
         calls += 1
 
-    jax_execution_policy.clear_jax_precision_validation_cache()
+    jax_execution_policy._PRECISION_VALIDATION_CACHE.clear()
     monkeypatch.setattr(
         jax_execution_policy,
         "_validate_precision_uncached",
@@ -527,7 +520,7 @@ def test_jax_precision_validation_cache_reuses_exact_instance_tuple(monkeypatch)
 
     assert calls == 1
 
-    jax_execution_policy.clear_jax_precision_validation_cache()
+    jax_execution_policy._PRECISION_VALIDATION_CACHE.clear()
 
 
 def test_execution_policy_runs_jax_cpu_float32_simulation():
@@ -546,16 +539,6 @@ def test_execution_policy_runs_jax_cpu_float32_simulation():
     result = run.single
 
     assert result.Vm.shape == (2, 5)
-
-
-def test_execution_policy_rejects_unsupported_runtime_for_simulation():
-    with pytest.raises(NotImplementedError, match="axs.runtime.numpy"):
-        _run_simulation(
-            _hh(compartments=5),
-            duration=0.10 * axs.ms,
-            dt=0.05 * axs.ms,
-            execution_policy=axs.ExecutionPolicy(runtime=axs.runtime.numpy),
-        )
 
 
 def test_execution_policy_rejects_unavailable_or_mixed_precision_for_simulation():

@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import numpy as np
 
-import axonscope as axs
-from axonscope import AxonInstance
-from axonscope.analytical import PointSourceElectrode
-from axonscope.axons import HodgkinHuxley
-from axonscope.runtime.jax.recording.observer import finalize_threshold_observer_state
-from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
-from axonscope.stimulation import Stimulus
+import axonfleet as axs
+from axonfleet import AxonInstance
+from axonfleet.analytical import PointSourceElectrode
+from axonfleet.axons import HodgkinHuxley
+from axonfleet.runtime.jax.recording.observer import finalize_threshold_observer_state
+from axonfleet.runtime.jax.policy.engine_types import JaxSolverEngine
+from axonfleet.stimulation import Stimulus
 
 
 def diagnostic_double_cable_solver_engine(
     solver: str,
     *,
     platform: str = "cpu",
-    allow_internal: bool = False,
     block_b: int | None = None,
 ) -> JaxSolverEngine:
     return JaxSolverEngine(
@@ -23,7 +22,6 @@ def diagnostic_double_cable_solver_engine(
         platform=platform,
         single_cable_solver="jax_tridiagonal",
         double_cable_block_solver=solver,
-        allow_internal_double_cable_block_solver=allow_internal,
         tiled_thomas_block_b=block_b,
     )
 

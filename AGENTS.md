@@ -1,8 +1,8 @@
 ---
-name: AxonScope Agent
-description: Working guide for the AxonScope peripheral nerve simulation repository
+name: AxonFleet Agent
+description: Working guide for the AxonFleet peripheral nerve simulation repository
 instructions: |
-  You are working in AxonScope, a pre-release Python framework for
+  You are working in AxonFleet, a pre-release Python framework for
   one-dimensional peripheral nerve axon simulations.
 
   ## Source Of Truth
@@ -20,23 +20,23 @@ instructions: |
 
   ## Product Boundary
 
-  AxonScope owns 1D axon models, membrane dynamics, stimulation along axons,
+  AxonFleet owns 1D axon models, membrane dynamics, stimulation along axons,
   simulation execution, recording, analyses, thresholds, recruitment, sweeps,
   validation, and performance evidence.
 
-  AxonScope does not own nerve/fascicle geometry, segmentation, 3D axon
+  AxonFleet does not own nerve/fascicle geometry, segmentation, 3D axon
   trajectories, anatomical frames, electrode CAD, surgical placement, or FEM
   field solving. External packages should provide sampled extracellular
-  footprints; AxonScope combines those footprints with temporal stimuli and
+  footprints; AxonFleet combines those footprints with temporal stimuli and
   runs the cable and membrane dynamics.
 
-  Intrinsic axon coordinates belong in AxonScope. World coordinates,
+  Intrinsic axon coordinates belong in AxonFleet. World coordinates,
   orientation, trajectories, and field-generation geometry stay outside the
   core architecture.
 
   ## Cleanup Policy
 
-  AxonScope is pre-release with one active user. Prefer clean convergence over
+  AxonFleet is pre-release with one active user. Prefer clean convergence over
   compatibility shims, aliases, deprecated wrappers, or parallel old/new public
   paths. The target is one concept, one public name, one execution path, and
   one canonical public result model.
@@ -72,7 +72,7 @@ instructions: |
   "intermediate representation" are internal compiler/runtime terms.
 
   Built-in membrane model truth lives in
-  `src/axonscope/membranes/models/`. Each model file owns equations,
+  `src/axonfleet/membranes/models/`. Each model file owns equations,
   unit-bearing defaults, aliases, and derived parameter logic. Axon templates
   may keep ergonomic model-specific kwargs, but they must forward those kwargs
   to the membrane source compiler instead of owning defaults or formulas.
@@ -80,10 +80,10 @@ instructions: |
   ## Runtime Boundary
 
   Public orchestration enters concrete JAX code through
-  `axonscope.runtime.execution`. Public `simulation.py`, `performance.py`,
-  and `inspection.py` must not import `axonscope.runtime.jax.*` directly.
-  Runtime-owned estimate/inspection facts route through runtime benchmark
-  support such as `src/axonscope/runtime/jax/benchmark.py`.
+  `axonfleet.runtime.execution`. Public `simulation.py`, `performance.py`,
+  and `inspection.py` must not import `axonfleet.runtime.jax.*` directly.
+  Runtime-owned estimate/inspection facts route through `runtime.execution`
+  and concrete support under `src/axonfleet/runtime/jax/benchmarking/`.
 
   Runtime/device/precision public values are `axs.runtime.*`, `axs.Device`,
   `axs.PrecisionPolicy`, and `axs.ExecutionPolicy`. Do not add string-primary
@@ -142,7 +142,7 @@ keywords:
 applyTo:
   - language: python
     patterns:
-      - src/axonscope/**/*.py
+      - src/axonfleet/**/*.py
       - examples/**/*.py
       - benchmark/**/*.py
       - tests/**/*.py
@@ -157,7 +157,7 @@ rules:
   - name: Replace optimized paths
     description: Promote optimizations by replacing the existing production path; discuss material result, output, or UI changes before implementation.
   - name: Respect runtime boundaries
-    description: Public simulation, estimate, and inspection modules route through axonscope.runtime.execution.
+    description: Public simulation, estimate, and inspection modules route through axonfleet.runtime.execution.
   - name: Validate proportionally
     description: Use fast unit checks for cleanup, NRV for numerical changes, and benchmarks for performance claims.
 
@@ -176,7 +176,7 @@ helpfulLinks:
     description: Supported benchmark surface and outputs.
 ---
 
-# AxonScope Development Agent
+# AxonFleet Development Agent
 
 This file is intentionally short. It is a working guide for agents, not a
 roadmap ledger. Keep detailed architecture direction in `GUIDELINES.md`, active

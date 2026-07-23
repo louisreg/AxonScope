@@ -83,16 +83,12 @@ def test_compilation_cache_replay_uses_fresh_processes(
     )
 
     assert len(calls) == 3
-    expected_cache = str(tmp_path / "triton_kernel_cache")
-    assert {env["AXONSCOPE_TRITON_KERNEL_CACHE"] for _, env in calls} == {
+    expected_cache = str(tmp_path / "persistent_cache")
+    assert {env["AXONFLEET_CACHE"] for _, env in calls} == {
         expected_cache
     }
-    expected_xla_cache = str(tmp_path / "jax_xla_cache")
-    assert {env["AXONSCOPE_JAX_COMPILATION_CACHE"] for _, env in calls} == {
-        expected_xla_cache
-    }
     assert all(
-        env["AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] == "-1"
+        env["AXONFLEET_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] == "-1"
         for _, env in calls
     )
     assert all("--cold-only" in command for command, _ in calls)

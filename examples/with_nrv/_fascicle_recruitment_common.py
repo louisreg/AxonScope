@@ -1,4 +1,4 @@
-"""Shared NRV geometry-to-AxonScope recruitment example runner."""
+"""Shared NRV geometry-to-AxonFleet recruitment example runner."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Circle, Patch, Polygon
 from rich.console import Console
 
-import axonscope as axs
-from axonscope.integrations import nrv as axs_nrv
+import axonfleet as axs
+from axonfleet.integrations import nrv as axs_nrv
 
 
 @dataclass(frozen=True)
 class ExampleConfig:
-    """Editable constants for the NRV-to-AxonScope recruitment example."""
+    """Editable constants for the NRV-to-AxonFleet recruitment example."""
 
     nerve_diameter_um: float = 1_000.0
     nerve_length_um: float = 10_000.0
@@ -52,7 +52,7 @@ class ExampleConfig:
 
 @dataclass(frozen=True)
 class NrvGeometry:
-    """NRV-owned nerve geometry plus contours for the AxonScope plot."""
+    """NRV-owned nerve geometry plus contours for the AxonFleet plot."""
 
     nerve: Any
     nerve_contour: np.ndarray
@@ -129,10 +129,10 @@ def run_fascicle_recruitment_example(
         unmyelinated_compartments=config.unmyelinated_compartments,
     )
     console.print(
-        f"NRV generated {len(nerve.fascicles)} fascicles and {len(axons)} AxonScope axons."
+        f"NRV generated {len(nerve.fascicles)} fascicles and {len(axons)} AxonFleet axons."
     )
 
-    console.print("[bold]2. Sample NRV LIFE/FEM footprints on AxonScope axons[/bold]")
+    console.print("[bold]2. Sample NRV LIFE/FEM footprints on AxonFleet axons[/bold]")
     footprints = axs_nrv.footprints_from_nrv(nerve, axons)
     pool = footprints.stimulated_population(
         electrode_index=0,
@@ -153,8 +153,8 @@ def run_fascicle_recruitment_example(
         drive_id=axs.DriveId("nrv_life_0"),
     )
 
-    console.print("[bold]3. Run AxonScope recruitment sweep[/bold]")
-    activation = axs.analysis.ActivationCriterion(
+    console.print("[bold]3. Run AxonFleet recruitment sweep[/bold]")
+    activation = axs.analysis.Activation(
         threshold=config.activation_threshold_mV * axs.mV,
         blanking=config.stimulus_start_ms * axs.ms,
         target=axs.positions.ALL,
@@ -186,7 +186,7 @@ def run_fascicle_recruitment_example(
         unit=axs.uA,
         include_total=False,
     )
-    ax.set_title(f"AxonScope recruitment on NRV {geometry_label} fibers")
+    ax.set_title(f"AxonFleet recruitment on NRV {geometry_label} fibers")
 
     snapshot_index = len(curve.amplitudes_uA) // 2
     snapshot_amplitude_uA = float(curve.amplitudes_uA[snapshot_index])

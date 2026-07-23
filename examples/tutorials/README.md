@@ -22,11 +22,11 @@ Planned notebook sequence:
 - `05_runtime_policy_and_inspection.ipynb`: execution policy, CPU/GPU intent,
   precision, memory estimates, and pipeline inspection.
 - `06_with_nrv_geometry.ipynb`: NRV-owned geometry and fiber placement mapped
-  into AxonScope simulations.
+  into AxonFleet simulations.
 
 Rules for tutorial notebooks:
 
-- keep all user-facing code on the public `axonscope as axs` API;
+- keep all user-facing code on the public `axonfleet as axs` API;
 - keep each notebook runnable on CPU with small defaults;
 - move benchmarking and profiling notebooks to `benchmark/notebooks/`;
 - include an executable script counterpart when a tutorial introduces a new

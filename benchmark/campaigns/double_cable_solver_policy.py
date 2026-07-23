@@ -148,7 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark/results/p11c_double_cable_solver_policy"),
+        default=Path("benchmark/results/double_cable_solver_policy"),
     )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--dry-run", action="store_true")

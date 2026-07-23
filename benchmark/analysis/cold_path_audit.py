@@ -142,13 +142,13 @@ class StageRow:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build a P11B cold-path timing and memory audit from benchmark runs.",
+        description="Build a cold-path timing and memory audit from benchmark runs.",
     )
     parser.add_argument("run_dirs", nargs="+", type=Path)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark/results/p11b_cold_path_audit"),
+        default=Path("benchmark/results/cold_path_audit"),
     )
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--no-plots", action="store_true")
@@ -353,7 +353,7 @@ def write_plots(output: Path, rows: Sequence[StageRow], *, top_n: int) -> None:
         bottoms += values
     ax.set_xticks(x, [_short(label, 34) for label in run_labels], rotation=20, ha="right")
     ax.set_ylabel("self time sum [ms]")
-    ax.set_title("P11B cold-path time by stage group")
+    ax.set_title("Cold-path time by stage group")
     ax.legend(ncols=2, fontsize=8)
     fig.savefig(output / "cold_path_group_time.png", dpi=160)
     plt.close(fig)

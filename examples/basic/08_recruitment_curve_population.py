@@ -17,7 +17,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -154,7 +154,7 @@ def main() -> None:
 
     # Recruitment is a row-wise activation test repeated for each current.
     # `target=ALL` means any recorded position may count as activation.
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=stim_start,
         target=axs.positions.ALL,

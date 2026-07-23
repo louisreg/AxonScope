@@ -18,7 +18,7 @@ htmlcov/
 #Macos 
 .DS_Store
 
-# Lock files are local for now: AxonScope is a library with ranged dependencies.
+# Lock files are local for now: AxonFleet is a library with ranged dependencies.
 # Commit one later only if the project switches to a fully pinned app/research env.
 uv.lock
 poetry.lock
@@ -39,25 +39,19 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
-# AxonScope generated artifacts
-.axonscope_cache/
+# AxonFleet generated artifacts
+.axonfleet_cache/
 .claude/
+.codex/
 benchmark/reports/
 benchmark/results/*
 !benchmark/results/.gitignore
-benchmark/kaggle/axonscope_solver_benchmarks_generated.py
+benchmark/kaggle/axonfleet_solver_benchmarks_generated.py
 benchmark/kaggle/kaggle_config.json
 benchmark/kaggle/kernel-metadata.json
-benchmark/legacy/pre_p11/reports/
-!benchmark/legacy/pre_p11/reports/double_cable_solver_optimization_2026_06.md
-!benchmark/legacy/pre_p11/reports/double_cable_solver_optimization_2026_06_speedups.svg
-benchmark/legacy/pre_p11/results/
-benchmark/legacy/pre_p11/kaggle/axonscope_solver_benchmarks_generated.py
-benchmark/legacy/pre_p11/kaggle/kaggle_config.json
-benchmark/legacy/pre_p11/kaggle/kernel-metadata.json
 figures/nrv_tests/
 figures/physics_tests/*.png
 
 
-# Graphify stuffs
+# Graphify output
 graphify-out/*

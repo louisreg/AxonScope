@@ -2,7 +2,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-import axonscope as axs
+import axonfleet as axs
+from axonfleet.axons.flattened import flatten_layout
+from axonfleet.axons.templates.mrg_like_double_cable import (
+    default_mrg_like_membranes,
+    layout_from_mrg_like_geometry,
+    mrg_like_length_from_nodes,
+    mrg_like_node_spacing,
+    mrg_like_nodes_from_length,
+)
 
 
 def test_unmyelinated_template_accepts_public_unit_names():
@@ -18,7 +26,7 @@ def test_unmyelinated_template_accepts_public_unit_names():
 
     assert axon.length == pytest.approx(1000.0)
     assert axon.diameter == pytest.approx(0.5)
-    flat = axs.axons.flatten_layout(axon.layout)
+    flat = flatten_layout(axon.layout)
     np.testing.assert_allclose(flat.diam_um, np.full(5, 0.5))
     np.testing.assert_allclose(flat.Ra_ohm_cm, np.full(5, 200.0))
     np.testing.assert_allclose(flat.Cm_uF_cm2, np.full(5, 1.0))
@@ -27,19 +35,19 @@ def test_unmyelinated_template_accepts_public_unit_names():
         axon.layout.position_values(unit=axs.mm),
         [0.1, 0.3, 0.5, 0.7, 0.9],
     )
-    assert axon.compartment_position(0, unit=axs.mm).magnitude == pytest.approx(0.1)
+    assert axon.layout.compartment_position(0, unit=axs.mm).magnitude == pytest.approx(0.1)
     assert axon.layout.compartment_position(-1, unit=axs.um).magnitude == pytest.approx(900.0)
     np.testing.assert_allclose(axon.layout.diameter_values(unit=axs.um), np.full(5, 0.5))
     np.testing.assert_allclose(axon.diameter_values(unit=axs.um), np.full(5, 0.5))
     with pytest.raises(IndexError, match="compartment index"):
-        axon.compartment_position(5)
+        axon.layout.compartment_position(5)
 
 
 def test_layout_reuses_one_read_only_flattened_representation():
     axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=3)
 
-    first = axs.axons.flatten_layout(axon.layout)
-    second = axs.axons.flatten_layout(axon.layout)
+    first = flatten_layout(axon.layout)
+    second = flatten_layout(axon.layout)
 
     assert second is first
     assert not first.x_um.flags.writeable
@@ -102,8 +110,8 @@ def test_template_axon_diameters_are_quantized_for_cache_reuse():
     assert large.diameter == pytest.approx(1.2)
     np.testing.assert_allclose(large.diameter_values(unit=axs.um), np.full(5, 1.2))
     assert mrg.diameter == pytest.approx(2.5)
-    assert axs.axons.mrg_like_node_spacing(2.52 * axs.um) == pytest.approx(
-        axs.axons.mrg_like_node_spacing(2.5 * axs.um)
+    assert mrg_like_node_spacing(2.52 * axs.um) == pytest.approx(
+        mrg_like_node_spacing(2.5 * axs.um)
     )
 
     equivalent_small = axs.axons.RattayAberham(
@@ -113,8 +121,8 @@ def test_template_axon_diameters_are_quantized_for_cache_reuse():
     )
     assert small.layout is equivalent_small.layout
     assert (
-        axs.axons.flatten_layout(small.layout).membrane_models[0]
-        is axs.axons.flatten_layout(equivalent_small.layout).membrane_models[0]
+        flatten_layout(small.layout).membrane_models[0]
+        is flatten_layout(equivalent_small.layout).membrane_models[0]
     )
 
 
@@ -136,7 +144,7 @@ def test_default_mrg_layout_reuses_complete_quantized_template_key():
     )
 
     assert first.layout is second.layout
-    assert axs.axons.flatten_layout(first.layout) is axs.axons.flatten_layout(
+    assert flatten_layout(first.layout) is flatten_layout(
         second.layout
     )
 
@@ -160,8 +168,8 @@ def test_default_mrg_layout_key_separates_structural_parameters():
         shifted.node_position_values(unit=axs.um)[0]
     )
     assert (
-        axs.axons.flatten_layout(base.layout).membrane_models[0]
-        != axs.axons.flatten_layout(warmer.layout).membrane_models[0]
+        flatten_layout(base.layout).membrane_models[0]
+        != flatten_layout(warmer.layout).membrane_models[0]
     )
 
 
@@ -174,13 +182,13 @@ def test_cached_default_mrg_layout_matches_explicit_uncached_construction():
     )
     cached = template.layout()
     geometry = template.geometry()
-    explicit = axs.axons.layout_from_mrg_like_geometry(
+    explicit = layout_from_mrg_like_geometry(
         geometry,
-        membranes=axs.axons.default_mrg_like_membranes(geometry),
+        membranes=default_mrg_like_membranes(geometry),
         compartments=template.compartments,
     )
-    cached_flat = axs.axons.flatten_layout(cached)
-    explicit_flat = axs.axons.flatten_layout(explicit)
+    cached_flat = flatten_layout(cached)
+    explicit_flat = flatten_layout(explicit)
 
     for field in (
         "x_um",
@@ -328,7 +336,7 @@ def test_layout_sequence_phase_shift_rotates_and_crops_repeated_motif():
         lengths=250.0 * axs.um,
         phase_shift=25.0 * axs.um,
     )
-    flat = axs.axons.flatten_layout(layout)
+    flat = flatten_layout(layout)
 
     assert flat.section_names[0] == "internode"
     assert flat.section_names[3] == "node"
@@ -336,14 +344,14 @@ def test_layout_sequence_phase_shift_rotates_and_crops_repeated_motif():
         layout.compartment_position(3, unit=axs.um).magnitude,
         30.0,
     )
-    assert layout.length == pytest.approx(250.0)
+    assert layout.length_um == pytest.approx(250.0)
 
 
 def test_mrg_x_shift_phases_node_positions_without_world_coordinates():
     base = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
     shifted = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5, x_shift=80.0 * axs.um)
 
-    node_spacing_um = axs.axons.mrg_like_node_spacing(10.0 * axs.um)
+    node_spacing_um = mrg_like_node_spacing(10.0 * axs.um)
     np.testing.assert_allclose(
         base.node_position_values(unit=axs.um),
         [0.5 + index * node_spacing_um for index in range(base.nodes)],
@@ -359,8 +367,8 @@ def test_mrg_x_shift_phases_node_positions_without_world_coordinates():
 
 
 def test_mrg_non_tabulated_node_count_uses_actual_morphology_spacing():
-    expected_length = axs.axons.mrg_like_length_from_nodes(2.52 * axs.um, 47)
-    expected_nodes = axs.axons.mrg_like_nodes_from_length(2.52 * axs.um, expected_length * axs.um)
+    expected_length = mrg_like_length_from_nodes(2.52 * axs.um, 47)
+    expected_nodes = mrg_like_nodes_from_length(2.52 * axs.um, expected_length * axs.um)
 
     axon = axs.axons.MRG(diameter=2.52 * axs.um, nodes=47)
 
@@ -432,12 +440,10 @@ def test_myelinated_geometry_helpers_and_layout_plotting():
     )
 
     assert axon.node_position_values(unit=axs.um).shape == (5,)
-    assert axon.node_index("proximal") == int(axon.node_indices[0])
-    assert axon.node_index("distal") == int(axon.node_indices[-1])
     assert axon.node_position("center", unit=axs.um).magnitude == pytest.approx(
         axon.node_position_values(unit=axs.um)[2]
     )
-    flat = axs.axons.flatten_layout(axon.layout)
+    flat = flatten_layout(axon.layout)
     assert flat.Nx > len(axon.layout.elements)
 
     fig, ax_layout = plt.subplots()

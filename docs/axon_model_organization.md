@@ -1,6 +1,6 @@
 # Axon Model Organization
 
-AxonScope models an axon as a descriptive object first. Solver arrays are
+AxonFleet models an axon as a descriptive object first. Solver arrays are
 derived only when a solver asks for them.
 
 ```text
@@ -12,8 +12,8 @@ The important split is:
 - `Section` describes a local membrane/material prototype.
 - `Layout` places sections in one-dimensional space and assigns compartment
   counts.
-- `FlattenedLayout` is the derived per-compartment representation used by the
-  solver bridge. It is not the modeling API.
+- The solver bridge privately materializes per-compartment arrays from the
+  layout. Those arrays are not part of the modeling API.
 
 ## Core Idea
 
@@ -43,12 +43,12 @@ New section/layout interfaces use short physical names and require units:
 - `Layout.sequence(..., section_lengths=..., lengths=..., phase_shift=...)`
 - `PeriaxonalLayer(radial_conductance=..., radial_capacitance=..., axial_resistance=...)`
 
-Internally, AxonScope stores explicit canonical floats such as `diameter_um`,
+Internally, AxonFleet stores explicit canonical floats such as `diameter_um`,
 `length_um`, `Ra_ohm_cm`, and `Cm_uF_cm2`. The unit-bearing public boundary is
 there to prevent ambiguous calls before publication.
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 section = axs.axons.Section(
     "axon",
@@ -69,7 +69,7 @@ layout = axs.axons.Layout.single_uniform(
 
 `axs.membranes.Model`
 
-A runtime-independent public membrane model from `axonscope.membranes`. It can
+A runtime-independent public membrane model from `axonfleet.membranes`. It can
 be a built-in membrane class, a user-authored class-based membrane model, or a
 composite membrane. It does not know about solvers, batches, JAX, or time
 stepping. The internal `MembraneModel` descriptor is compiler/runtime plumbing,
@@ -121,13 +121,12 @@ phased = axs.axons.Layout.sequence(
 layout.plot(position_unit=axs.um, compartment_labels="auto")
 ```
 
-`FlattenedLayout`
+Runtime materialization
 
-The canonical per-compartment arrays derived by
-`axs.axons.flatten_layout(layout)`. It contains arrays such as `x_um`,
-`lengths_um`, `diam_um`, membrane models, section names, and section indices.
-This object lives in `axonscope.axons.flattened` so the descriptive layout stays
-separate from solver-facing arrays.
+The runtime privately derives canonical per-compartment arrays such as
+positions, lengths, diameters, membrane models, section names, and section
+indices. Public inspection stays on `Layout.position_values(...)`,
+`diameter_values(...)`, `compartment_length_values(...)`, and `plot(...)`.
 
 `Axon`
 
@@ -140,8 +139,9 @@ stimulation protocols or solver runtime arrays.
 
 `AxonInstance`
 
-The simulation protocol wrapped around one descriptive `Axon`. It owns global
-position, intracellular clamps, and extracellular stimulation contexts.
+The simulation protocol wrapped around one descriptive `Axon`. It owns
+intracellular clamps and sampled extracellular stimulation in the axon's
+intrinsic coordinate system. Anatomical placement remains outside AxonFleet.
 
 `AxonPopulation`
 
@@ -159,57 +159,55 @@ execution path, including one-row `B=1` batch runs.
 `SolverAxon`
 
 The NumPy-only runtime-neutral representation built from an `Axon` or
-`AxonInstance` in `axonscope.runtime.solver_axon`. It combines the flattened
+`AxonInstance` in `axonfleet.runtime.solver_axon`. It combines the flattened
 layout with formulation and simulation-level periaxonal overrides.
 
 ## Module Responsibilities
 
-`src/axonscope/axons/section.py`
+`src/axonfleet/axons/section.py`
 
 Defines local descriptive objects:
 
 - `Section`
 - `PeriaxonalLayer`
 
-`src/axonscope/axons/layout.py`
+`src/axonfleet/axons/layout.py`
 
 Defines the user-facing spatial layout:
 
 - `LayoutElement`
 - `Layout`
 
-`src/axonscope/axons/flattened.py`
+`src/axonfleet/axons/flattened.py`
 
-Defines derived per-compartment geometry:
+Defines the private derived per-compartment geometry consumed by runtime
+materialization.
 
-- `FlattenedLayout`
-- `flatten_layout`
-
-`src/axonscope/axons/axon.py`
+`src/axonfleet/axons/axon.py`
 
 Defines:
 
 - `Axon`
 
-`src/axonscope/axon_instance.py`
+`src/axonfleet/axon_instance.py`
 
 Defines:
 
 - `AxonInstance`
 
-`src/axonscope/population.py`
+`src/axonfleet/population.py`
 
 Defines:
 
 - `AxonPopulation`
 
-`src/axonscope/simulation.py`
+`src/axonfleet/simulation.py`
 
 Defines:
 
 - `AxonSimulation`
 
-`src/axonscope/runtime/solver_axon.py`
+`src/axonfleet/runtime/solver_axon.py`
 
 Defines:
 
@@ -218,23 +216,24 @@ Defines:
 
 This is the runtime-neutral bridge from descriptive axons to numerical arrays.
 
-`src/axonscope/axons/unmyelinated.py`
+`src/axonfleet/axons/unmyelinated.py`
 
 Defines ready-made unmyelinated templates such as `HodgkinHuxley`,
 `RattayAberham`, `Sundt`, `Tigerholm`, `Schild94`, and `Schild97`.
 
-`src/axonscope/axons/myelinated.py`
+`src/axonfleet/axons/myelinated.py`
 
 Defines myelinated templates such as `MRG`, `GainesMotor`, and
 `GainesSensory`.
 
-`src/axonscope/axons/templates/mrg_like_double_cable.py`
+`src/axonfleet/axons/templates/mrg_like_double_cable.py`
 
 Defines the reusable MRG-like double-cable layout template. It describes the
 node/MYSA/FLUT/STIN geometry and periaxonal structure. Use
 `Layout.sequence(..., phase_shift=...)` for generic repeated motifs. Use
-`x_shift` on `MRG(...)` or `mrg_like_layout(...)` when a pool needs intrinsic
-MRG node phase shifts, such as NRV fractional `node_shift` conversion. Use
+`x_shift` on `MRG(...)` or `MRGLikeDoubleCableTemplate(...)` when a pool needs
+intrinsic MRG node phase shifts, such as NRV fractional `node_shift`
+conversion. Use
 `Layout.with_x_shift(...)` only for simple local translation of an already
 defined layout. Do not store anatomical placement on axon instances.
 
@@ -243,7 +242,7 @@ defined layout. Do not store anatomical placement on axon instances.
 ### Explicit Mono-Section Axon
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 section = axs.axons.Section(
     "axon",
@@ -289,7 +288,7 @@ length; it must be an integer multiple of `sum(section_lengths)`.
 
 ## Boundary Rules
 
-`axonscope.axons` and `axonscope.membranes` should stay descriptive:
+`axonfleet.axons` and `axonfleet.membranes` should stay descriptive:
 
 - no solver kernels;
 - no backend construction;
@@ -298,7 +297,7 @@ length; it must be an integer multiple of `sum(section_lengths)`.
 - no stimulation protocol state.
 
 Membrane/cable runtime compilation belongs in
-`axonscope.runtime.jax.preparation.base`.
+`axonfleet.runtime.jax.preparation.base`.
 Stimulation runtime compilation belongs in
-`axonscope.runtime.jax.inputs`.
-Pool and batch row preparation belongs in `axonscope.preparation`.
+`axonfleet.runtime.jax.inputs`.
+Pool and batch row preparation belongs in `axonfleet.preparation`.

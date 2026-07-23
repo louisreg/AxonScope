@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from axonscope.runtime.jax import compilation_cache
+from axonfleet.runtime.jax import compilation_cache
 
 
 class _ConfigRecorder:
@@ -11,17 +11,17 @@ class _ConfigRecorder:
         self.values[name] = value
 
 
-def test_jax_compilation_cache_defaults_under_axonscope_cache(
+def test_jax_compilation_cache_defaults_under_axonfleet_cache(
     monkeypatch,
     tmp_path,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AXONSCOPE_JAX_COMPILATION_CACHE", raising=False)
+    monkeypatch.delenv("AXONFLEET_CACHE", raising=False)
 
     policy = compilation_cache.jax_compilation_cache_policy()
 
     assert policy.enabled is True
-    assert policy.directory == tmp_path / ".axonscope_cache" / "runtime" / "jax" / "xla"
+    assert policy.directory == tmp_path / ".axonfleet_cache" / "runtime" / "jax" / "xla"
     assert policy.min_compile_time_s == 0.5
     assert policy.min_entry_size_bytes == 0
     assert policy.max_size_bytes == 2 * 1024**3
@@ -30,7 +30,7 @@ def test_jax_compilation_cache_defaults_under_axonscope_cache(
 
 def test_jax_compilation_cache_can_be_disabled(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AXONSCOPE_JAX_COMPILATION_CACHE", "off")
+    monkeypatch.setenv("AXONFLEET_CACHE", "off")
     config = _ConfigRecorder()
 
     policy = compilation_cache.configure_jax_compilation_cache(jax_config=config)
@@ -41,12 +41,13 @@ def test_jax_compilation_cache_can_be_disabled(monkeypatch, tmp_path) -> None:
 
 
 def test_jax_compilation_cache_honors_policy_overrides(monkeypatch, tmp_path) -> None:
-    directory = tmp_path / "shared-xla"
-    monkeypatch.setenv("AXONSCOPE_JAX_COMPILATION_CACHE", str(directory))
-    monkeypatch.setenv("AXONSCOPE_JAX_CACHE_MIN_COMPILE_TIME_S", "0")
-    monkeypatch.setenv("AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
-    monkeypatch.setenv("AXONSCOPE_JAX_CACHE_MAX_SIZE_BYTES", "4096")
-    monkeypatch.setenv("AXONSCOPE_JAX_PERSISTENT_XLA_CACHES", "all")
+    cache_root = tmp_path / "shared-cache"
+    directory = cache_root / "runtime" / "jax" / "xla"
+    monkeypatch.setenv("AXONFLEET_CACHE", str(cache_root))
+    monkeypatch.setenv("AXONFLEET_JAX_CACHE_MIN_COMPILE_TIME_S", "0")
+    monkeypatch.setenv("AXONFLEET_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
+    monkeypatch.setenv("AXONFLEET_JAX_CACHE_MAX_SIZE_BYTES", "4096")
+    monkeypatch.setenv("AXONFLEET_JAX_PERSISTENT_XLA_CACHES", "all")
     config = _ConfigRecorder()
 
     policy = compilation_cache.configure_jax_compilation_cache(jax_config=config)
@@ -66,11 +67,11 @@ def test_jax_compilation_cache_honors_policy_overrides(monkeypatch, tmp_path) ->
 def test_jax_compilation_cache_rejects_unknown_xla_cache_mode(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("AXONSCOPE_JAX_PERSISTENT_XLA_CACHES", "mystery")
+    monkeypatch.setenv("AXONFLEET_JAX_PERSISTENT_XLA_CACHES", "mystery")
 
     try:
         compilation_cache.jax_compilation_cache_policy()
     except ValueError as exc:
-        assert "AXONSCOPE_JAX_PERSISTENT_XLA_CACHES" in str(exc)
+        assert "AXONFLEET_JAX_PERSISTENT_XLA_CACHES" in str(exc)
     else:
         raise AssertionError("unknown XLA cache mode should be rejected")

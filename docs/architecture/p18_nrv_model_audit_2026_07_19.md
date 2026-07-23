@@ -1,6 +1,6 @@
 # P18 NRV Membrane Model Audit
 
-This audit compares the built-in AxonScope membrane and axon templates with
+This audit compares the built-in AxonFleet membrane and axon templates with
 the official NRV source at commit
 `7dc11954bfa69291cd5853dd99a99de12f106bef`. The local numerical campaign uses
 NRV 1.4.0.
@@ -17,7 +17,7 @@ The NRV reference surface is:
 The audit keeps four different claims separate:
 
 1. **Source mapped**: every NRV mechanism and wrapper default has an identified
-   AxonScope owner.
+   AxonFleet owner.
 2. **Static checked**: equations, parameters, states, temperature factors, and
    mechanism composition were compared with the source.
 3. **Integrated checked**: cable propagation or extracellular behavior was
@@ -31,9 +31,9 @@ therefore run separately from the velocity campaign.
 
 ## Existing Model Status
 
-| AxonScope model | NRV source | Current status |
+| AxonFleet model | NRV source | Current status |
 | --- | --- | --- |
-| Passive | NEURON `pas` | The configured NRV mechanism and AxonScope recording satisfy the same `g_pas * (Vm - e_pas)` current definition; cable numerics remain covered separately. |
+| Passive | NEURON `pas` | The configured NRV mechanism and AxonFleet recording satisfy the same `g_pas * (Vm - e_pas)` current definition; cable numerics remain covered separately. |
 | Hodgkin-Huxley | NEURON `hh` plus `pas` | Defaults corrected to NRV's 32 degC template and additional `pas` leak. Velocity and detailed Vm/current/gate campaigns pass. |
 | Rattay-Aberham | `RattayAberham.mod` plus `pas` | Sodium reversal corrected from 50 to 45 mV and gate updates aligned with NEURON `cnexp`. Velocity and detailed Vm/current/gate campaigns pass. |
 | Sundt | `nahh.mod`, `kdr.mod`, and `pas` | Sodium and leak reversals corrected to 50 and -60 mV. Velocity and detailed Vm/current/gate campaigns pass. |
@@ -62,7 +62,7 @@ The detailed current audit found a Tigerholm-specific semantic mismatch that
 propagation tests had hidden. NRV's `I_na` and `I_k` are NEURON ion totals:
 they use concentration-dependent reversal potentials, split HCN equally
 between Na and K, include the Na/K pump, and drive the `naoi`/`koi`
-concentration mechanisms. AxonScope had instead recorded static channel
+concentration mechanisms. AxonFleet had instead recorded static channel
 component summaries and omitted HCN/pump terms from the concentration budgets.
 The canonical source model now exposes the same ion totals while retaining one
 stateful solver path. At the intracellular reference point this reduced the
@@ -91,32 +91,16 @@ runtime branches:
 - Nav1.1 and Nav1.6 compose with the retained MRG potassium/leak membrane
   through public `Composite` and `SectionLayout` objects.
 
-NRV remains an independent validation reference. AxonScope does not copy its
+NRV remains an independent validation reference. AxonFleet does not copy its
 assembly code or introduce Gaines- or Markov-specific solver paths.
 
 ## Fresh Evidence
 
-After the runtime and default corrections:
-
-```text
-tests/unit
-864 passed, 1 skipped
-
-tests/nrv/velocity_vs_diameter/test_velocity_systematic_vs_nrv.py
-9 passed
-
-tests/nrv/intracellular/test_intracellular_systematic_vs_nrv.py
-9 passed
-
-tests/nrv/extracellular/test_extracellular_systematic_vs_nrv.py
-9 passed
-
-tests/nrv/numerics/test_gaines_membranes_vs_nrv.py
-2 passed
-
-tests/nrv
-124 passed
-```
+The consolidated `tests/nrv` campaign passed all 115 retained comparisons on
+2026-07-23. This count covers the systematic velocity, intracellular, and
+extracellular campaigns plus the focused numerical checks described above.
+Historical duplicate and diagnostic-only NRV tests were removed during P19;
+the smaller count is a suite-convergence change, not reduced model coverage.
 
 The systematic velocity campaign now uses bilateral crossing-time regression
 with a shared `2%` relative tolerance and a `0.001 m/s` numerical floor. The
@@ -141,5 +125,5 @@ evidence and executable documentation. The retained mapping is:
 The four Nav I-V, normalized G-V, availability, and recovery workflows remain
 the runnable validation runner
 `benchmark/curves/nav_isoform_voltage_clamp.py`. They intentionally do not
-appear as public simulation APIs: AxonScope does not yet define a public
+appear as public simulation APIs: AxonFleet does not yet define a public
 voltage-clamp protocol, and examples must not import runtime compiler internals.

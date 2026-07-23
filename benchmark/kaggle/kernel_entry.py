@@ -1,7 +1,7 @@
-"""Kaggle entry point for AxonScope benchmark campaigns.
+"""Kaggle entry point for AxonFleet benchmark campaigns.
 
 This script is uploaded by `benchmark/kaggle/run_kernel.py`. It clones the
-configured AxonScope branch, installs the benchmark dependencies, runs
+configured AxonFleet branch, installs the benchmark dependencies, runs
 `benchmark/run.py` or a benchmark campaign runner, records Kaggle hardware
 metadata, and archives `benchmark/results` as a downloadable output.
 """
@@ -17,7 +17,6 @@ import shutil
 import subprocess
 import sys
 import time
-import tomllib
 import traceback
 from datetime import datetime
 from typing import Any
@@ -35,8 +34,8 @@ SENSITIVE_ENV_MARKERS = (
 )
 
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
-SCRATCH_DIR = pathlib.Path(os.environ.get("AXONSCOPE_KAGGLE_SCRATCH_DIR", "/tmp/axonscope_kaggle"))
-CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
+SCRATCH_DIR = pathlib.Path(os.environ.get("AXONFLEET_KAGGLE_SCRATCH_DIR", "/tmp/axonfleet_kaggle"))
+CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONFLEET_CHECKOUT_DIR", "/tmp/AxonFleet"))
 PYTHON_EXECUTABLE = pathlib.Path(sys.executable)
 os.environ.setdefault("MAMBA_ROOT_PREFIX", str(SCRATCH_DIR / "micromamba_root"))
 
@@ -81,10 +80,10 @@ def main() -> None:
         raise
     finally:
         _write_process_snapshot(output_dir / "kaggle_processes_before_cleanup.txt")
-        archive_base = WORK_DIR / f"axonscope_benchmark_results_{run_id}"
+        archive_base = WORK_DIR / f"axonfleet_benchmark_results_{run_id}"
         archive = shutil.make_archive(str(archive_base), "zip", output_dir)
-        print(f"AxonScope benchmark results: {output_dir}")
-        print(f"AxonScope benchmark archive: {archive}")
+        print(f"AxonFleet benchmark results: {output_dir}")
+        print(f"AxonFleet benchmark archive: {archive}")
         _terminate_native_leftovers()
         sys.stdout.flush()
         sys.stderr.flush()
@@ -142,18 +141,6 @@ def _install_repo(config: dict[str, Any]) -> None:
         _run(["apt-get", "install", "-y", *apt_packages])
     _run([python, "-m", "pip", "install", "-U", "pip"])
     _run([python, "-m", "pip", "install", "-e", install_target], cwd=CHECKOUT_DIR)
-    cuda_extra = str(config.get("jax_cuda_extra") or "").strip()
-    if cuda_extra:
-        _run(
-            [
-                python,
-                "-m",
-                "pip",
-                "install",
-                "-U",
-                _jax_cuda_requirement(cuda_extra),
-            ]
-        )
     pip_packages = [
         str(package)
         for package in config.get("pip_packages", ())
@@ -161,32 +148,6 @@ def _install_repo(config: dict[str, Any]) -> None:
     ]
     if pip_packages:
         _run([python, "-m", "pip", "install", *pip_packages])
-
-
-def _jax_cuda_requirement(
-    cuda_extra: str,
-    *,
-    pyproject_path: pathlib.Path | None = None,
-) -> str:
-    path = (
-        CHECKOUT_DIR / "pyproject.toml"
-        if pyproject_path is None
-        else pyproject_path
-    )
-    payload = tomllib.loads(path.read_text(encoding="utf-8"))
-    dependencies = payload.get("project", {}).get("dependencies", ())
-    for dependency in dependencies:
-        requirement = str(dependency).strip()
-        if requirement.lower().startswith("jax") and requirement[3:4] in {
-            "<",
-            ">",
-            "=",
-            "!",
-            "~",
-        }:
-            constraint = requirement[3:].split(";", 1)[0].strip()
-            return f"jax[{cuda_extra}]{constraint}"
-    raise RuntimeError(f"No constrained JAX dependency found in {path}.")
 
 
 def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list[str]:
@@ -211,19 +172,6 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
         command = [
             python,
             "benchmark/campaigns/double_cable_solver_policy.py",
-            "--preset",
-            str(config["preset"]),
-            "--platform",
-            str(config["platform"]),
-            "--output",
-            str(output_dir),
-        ]
-        command.extend(str(value) for value in config.get("benchmark_args", ()))
-        return command
-    if campaign == "single_cable_solver_policy":
-        command = [
-            python,
-            "benchmark/campaigns/single_cable_solver_policy.py",
             "--preset",
             str(config["preset"]),
             "--platform",
@@ -264,7 +212,7 @@ def _benchmark_environment(config: dict[str, Any]) -> dict[str, str]:
 
 def _install_nrv_stack() -> pathlib.Path:
     micromamba = _install_micromamba()
-    env_dir = SCRATCH_DIR / "axonscope_nrv_env"
+    env_dir = SCRATCH_DIR / "axonfleet_nrv_env"
     env_yaml = SCRATCH_DIR / "nrv_linux.yaml"
     SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
     _run(

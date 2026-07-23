@@ -1,8 +1,7 @@
 # Kaggle Benchmark Runner
 
-This runner submits the current P11A benchmark surface to Kaggle through the
-same `benchmark/run.py` script used locally. It does not know about legacy
-benchmark suites.
+This runner submits the current benchmark surface to Kaggle through the same
+`benchmark/run.py` script used locally.
 
 Prepare a package without touching the network:
 
@@ -39,7 +38,7 @@ python benchmark/kaggle/run_kernel.py \
   --case-filter observer_only
 ```
 
-To compare the AxonScope CPU path and GPU path on a closer Kaggle runtime,
+To compare the AxonFleet CPU path and GPU path on a closer Kaggle runtime,
 keep the GPU machine shape but switch only the benchmark platform:
 
 ```bash
@@ -70,7 +69,7 @@ machine:
 ```bash
 python benchmark/kaggle/run_kernel.py \
   --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11c-solver-policy-cpu \
+  --slug axonfleet-solver-policy-cpu \
   --campaign double_cable_solver_policy \
   --preset quick \
   --platform cpu \
@@ -91,7 +90,7 @@ the solver set:
 ```bash
 python benchmark/kaggle/run_kernel.py \
   --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11c-solver-policy-gpu \
+  --slug axonfleet-solver-policy-gpu \
   --campaign double_cable_solver_policy \
   --preset gpu_smoke \
   --platform gpu \
@@ -107,13 +106,13 @@ python benchmark/kaggle/run_kernel.py \
   --warmups 1
 ```
 
-Submit the P11B time-chunk sweep campaign on the CPU path of a Kaggle GPU
+Submit the time-chunk sweep campaign on the CPU path of a Kaggle GPU
 machine:
 
 ```bash
 python benchmark/kaggle/run_kernel.py \
   --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11b-time-chunk-sweep-cpu \
+  --slug axonfleet-time-chunk-sweep-cpu \
   --campaign time_chunk_sweep \
   --script recruitment_curves \
   --preset quick \
@@ -133,10 +132,6 @@ python benchmark/kaggle/run_kernel.py \
 
 Switch only `--platform gpu`, the slug, and the memory trace to `device` for
 the matching GPU sweep.
-
-Older P11B/P11C solver-stage, lowering, PCR-state, and large-population
-analysis campaigns are no longer part of the active Kaggle runner. Keep current
-Kaggle validation on curve scripts and solver-policy campaigns.
 
 Run recruitment on a T4:
 
@@ -167,7 +162,7 @@ python benchmark/run.py --script ... --preset ... --platform ... --output ...
 ```
 
 and writes `kaggle_hardware.json`, `kaggle_command.json`, benchmark outputs,
-and `axonscope_benchmark_results_<run_id>.zip`.
+and `axonfleet_benchmark_results_<run_id>.zip`.
 
 Keep whole-session JAX tracing on small trace presets only. Trace outputs can
 grow quickly; use `gpu_smoke` for functional GPU acceptance and

@@ -1,4 +1,4 @@
-"""Write per-run-pool timing details from AxonScope benchmark events."""
+"""Write per-run-pool timing details from AxonFleet benchmark events."""
 
 from __future__ import annotations
 

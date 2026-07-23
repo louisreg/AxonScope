@@ -1,4 +1,4 @@
-"""Benchmark one AxonScope simulation and plot what happened.
+"""Benchmark one AxonFleet simulation and plot what happened.
 
 Run:
     MPLBACKEND=Agg python benchmark/examples/runtime_benchmarking_options.py
@@ -6,7 +6,7 @@ Run:
 This is a teaching example, not a benchmark campaign. It shows the smallest
 useful workflow:
 
-1. build a normal AxonScope simulation;
+1. build a normal AxonFleet simulation;
 2. wrap `AxonSimulation(...).run()` with `axs.benchmark(...)`;
 3. read the generated `summary.csv`, `events.jsonl`, and `memory_summary.csv`;
 4. plot the time and memory spent in each recorded stage.
@@ -35,7 +35,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR.resolve()))
 
 import matplotlib.pyplot as plt
 
-import axonscope as axs
+import axonfleet as axs
 
 
 MEMORY_TRACE_HELP = {
@@ -77,12 +77,12 @@ def main() -> None:
 
     print_memory_trace_options(args.memory_trace)
 
-    # Step 1: the simulation is ordinary AxonScope code. Nothing benchmark-
+    # Step 1: the simulation is ordinary AxonFleet code. Nothing benchmark-
     # specific is needed in the model, stimulation, or recording definition.
     print("\nBuilding one small Hodgkin-Huxley simulation...")
 
     # Step 2: `axs.benchmark(...)` turns on instrumentation while the simulation
-    # runs. AxonScope internals emit spans such as dispatch, preparation, input
+    # runs. AxonFleet internals emit spans such as dispatch, preparation, input
     # lowering, kernel execution, and result assembly.
     print(f"Running benchmark -> {benchmark_dir}")
     with axs.benchmark(
@@ -97,7 +97,7 @@ def main() -> None:
         jax_device_memory_profile=args.jax_device_memory_profile,
         jax_device_memory_profile_stages=("kernel.wait",),
     ):
-        result = run_axonscope_simulation(args)
+        result = run_axonfleet_simulation(args)
 
     # Step 3: use the result normally. The benchmark session is just a wrapper.
     peak_mV = float(result.single.peak_voltage_values(unit=axs.mV)[0])
@@ -135,7 +135,7 @@ def main() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Pedagogical AxonScope benchmark instrumentation example.",
+        description="Pedagogical AxonFleet benchmark instrumentation example.",
     )
     parser.add_argument(
         "--output",
@@ -190,7 +190,7 @@ def print_memory_trace_options(selected: str) -> None:
     )
 
 
-def run_axonscope_simulation(args: argparse.Namespace):
+def run_axonfleet_simulation(args: argparse.Namespace):
     length = 120.0 * axs.um
     axon = axs.axons.HodgkinHuxley(
         length=length,
@@ -374,7 +374,7 @@ def compare_memory_trace_modes(
             memory_trace=mode,
             memory_top_n=args.memory_top_n,
         ):
-            run_axonscope_simulation(args)
+            run_axonfleet_simulation(args)
         stage = read_stage_rows(case_dir)[0]
         rows.append((mode, stage.total_ms, stage.rss_delta_mib, stage.tracemalloc_peak_mib))
 

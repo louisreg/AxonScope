@@ -5,23 +5,9 @@ from pathlib import Path
 
 from benchmark.kaggle.kernel_entry import (
     _benchmark_environment,
-    _jax_cuda_requirement,
     _redact_env_value,
 )
 from benchmark.kaggle.run_kernel import main as run_kaggle
-
-
-def test_kaggle_cuda_install_preserves_project_jax_constraint(tmp_path: Path):
-    pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\ndependencies = ["numpy>=1.26", "jax>=0.10.1,<0.11.0"]\n',
-        encoding="utf-8",
-    )
-
-    assert (
-        _jax_cuda_requirement("cuda12", pyproject_path=pyproject)
-        == "jax[cuda12]>=0.10.1,<0.11.0"
-    )
 
 
 def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
@@ -63,13 +49,13 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     package = run_dirs[0] / "kernel"
     metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
     config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
+    kernel_source = (package / "axonfleet_benchmark_kernel.py").read_text(encoding="utf-8")
 
-    assert (package / "axonscope_benchmark_kernel.py").is_file()
+    assert (package / "axonfleet_benchmark_kernel.py").is_file()
     assert "EMBEDDED_CONFIG: dict[str, Any] = json.loads(" in kernel_source
     assert '"repo_url"' in kernel_source
-    assert metadata["id"] == "demo-user/axonscope-p11a-benchmarks"
-    assert metadata["code_file"] == "axonscope_benchmark_kernel.py"
+    assert metadata["id"] == "demo-user/axonfleet-benchmarks"
+    assert metadata["code_file"] == "axonfleet_benchmark_kernel.py"
     assert metadata["enable_gpu"] == "true"
     assert metadata["machine_shape"] == "NvidiaTeslaP100"
     assert config["script"] == "threshold_curves"
@@ -78,7 +64,8 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     assert config["require_gpu"] is True
     assert config["apt_packages"] == ["libglu1-mesa"]
     assert config["nrv_conda_env"] is True
-    assert config["pip_packages"] == ["nrv-py", "triton", "jax-triton"]
+    assert config["install_target"] == ".[benchmark,cuda12]"
+    assert config["pip_packages"] == ["nrv-py"]
     assert config["benchmark_env"] == {
         "XLA_FLAGS": "--xla_gpu_enable_command_buffer=FUSION,WHILE,CUSTOM_CALL"
     }
@@ -97,7 +84,7 @@ def test_kaggle_runner_dry_run_supports_time_chunk_campaign(tmp_path: Path):
                 "--username",
                 "demo-user",
                 "--slug",
-                "axonscope-p11b-time-chunk-sweep-cpu",
+                "axonfleet-time-chunk-sweep-cpu",
                 "--campaign",
                 "time_chunk_sweep",
                 "--script",
@@ -124,9 +111,9 @@ def test_kaggle_runner_dry_run_supports_time_chunk_campaign(tmp_path: Path):
     package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
     metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
     config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
+    kernel_source = (package / "axonfleet_benchmark_kernel.py").read_text(encoding="utf-8")
 
-    assert metadata["id"] == "demo-user/axonscope-p11b-time-chunk-sweep-cpu"
+    assert metadata["id"] == "demo-user/axonfleet-time-chunk-sweep-cpu"
     assert metadata["enable_gpu"] == "true"
     assert metadata["machine_shape"] == "NvidiaTeslaP100"
     assert config["campaign"] == "time_chunk_sweep"
@@ -151,7 +138,7 @@ def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
                 "--username",
                 "demo-user",
                 "--slug",
-                "axonscope-p11c-solver-policy-gpu",
+                "axonfleet-solver-policy-gpu",
                 "--campaign",
                 "double_cable_solver_policy",
                 "--preset",
@@ -184,9 +171,9 @@ def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
     package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
     metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
     config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
+    kernel_source = (package / "axonfleet_benchmark_kernel.py").read_text(encoding="utf-8")
 
-    assert metadata["id"] == "demo-user/axonscope-p11c-solver-policy-gpu"
+    assert metadata["id"] == "demo-user/axonfleet-solver-policy-gpu"
     assert metadata["enable_gpu"] == "true"
     assert config["campaign"] == "double_cable_solver_policy"
     assert config["script"] is None
@@ -208,70 +195,6 @@ def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
         "32",
     ]
     assert "benchmark/campaigns/double_cable_solver_policy.py" in kernel_source
-
-
-def test_kaggle_runner_dry_run_supports_single_cable_solver_policy_campaign(
-    tmp_path: Path,
-):
-    assert (
-        run_kaggle(
-            [
-                "--username",
-                "demo-user",
-                "--slug",
-                "axonscope-p11-single-policy-gpu",
-                "--campaign",
-                "single_cable_solver_policy",
-                "--preset",
-                "gpu_smoke",
-                "--platform",
-                "gpu",
-                "--machine-shape",
-                "NvidiaTeslaP100",
-                "--dry-run",
-                "--no-publish-branch",
-                "--output-root",
-                str(tmp_path),
-                "--curve-script",
-                "recruitment_curves,threshold_curves",
-                "--solver",
-                "auto,jax_tridiagonal",
-                "--n-axons",
-                "64,4096",
-                "--nx",
-                "89",
-                "--recording",
-                "observer_only",
-            ]
-        )
-        == 0
-    )
-
-    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
-    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
-    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
-
-    assert metadata["id"] == "demo-user/axonscope-p11-single-policy-gpu"
-    assert metadata["enable_gpu"] == "true"
-    assert config["campaign"] == "single_cable_solver_policy"
-    assert config["script"] is None
-    assert config["preset"] == "gpu_smoke"
-    assert config["platform"] == "gpu"
-    assert config["require_gpu"] is True
-    assert config["benchmark_args"] == [
-        "--curve-script",
-        "recruitment_curves,threshold_curves",
-        "--solver",
-        "auto,jax_tridiagonal",
-        "--n-axons",
-        "64,4096",
-        "--nx",
-        "89",
-        "--recording",
-        "observer_only",
-    ]
-    assert "benchmark/campaigns/single_cable_solver_policy.py" in kernel_source
 
 
 def test_kaggle_runner_cpu_shape_forces_cpu_platform(tmp_path: Path):

@@ -1,6 +1,6 @@
-# AxonScope
+# AxonFleet
 
-AxonScope is a pre-release Python framework for one-dimensional peripheral
+AxonFleet is a pre-release Python framework for one-dimensional peripheral
 nerve axon simulations. It focuses on explicit physical units, descriptive
 axon and stimulation objects, validated solver behavior, and batch-ready
 execution for axon pools.
@@ -9,9 +9,9 @@ The public API is still evolving before publication. Use the current names in
 this README and in `examples/` as the supported surface; old temporary aliases
 are not kept for compatibility.
 
-## What AxonScope Owns
+## What AxonFleet Owns
 
-AxonScope owns:
+AxonFleet owns:
 
 - one-dimensional axon descriptions and membrane dynamics;
 - intracellular clamps and sampled extracellular footprints along axons;
@@ -19,14 +19,14 @@ AxonScope owns:
 - recording, results, analysis, thresholds, recruitment, sweeps, inspection,
   validation, and performance evidence.
 
-AxonScope does not own nerve/fascicle geometry, histology segmentation, 3D axon
+AxonFleet does not own nerve/fascicle geometry, histology segmentation, 3D axon
 trajectories, electrode CAD, surgical placement, or FEM field solving. External
-tools should produce sampled extracellular footprints; AxonScope combines those
+tools should produce sampled extracellular footprints; AxonFleet combines those
 footprints with temporal stimuli and runs the cable and membrane dynamics.
 
 ## Installation
 
-AxonScope uses Python `>=3.12,<3.13` and a `src/` layout.
+AxonFleet uses Python `>=3.12,<3.13` and a `src/` layout.
 
 ```bash
 python -m pip install -e .
@@ -38,16 +38,19 @@ Useful extras:
 python -m pip install -e ".[examples]"
 python -m pip install -e ".[dev]"
 python -m pip install -e ".[benchmark]"
+python -m pip install -e ".[benchmark,cuda12]"  # NVIDIA CUDA 12 + Triton
 python -m pip install -e ".[dev,nrv]"
 ```
 
-The `nrv` extra installs Python-side helper dependencies only. Running
-`tests/nrv` still requires a working local NRV/NEURON setup.
+The base install remains CPU-only. The `cuda12` extra is the supported NVIDIA
+stack and includes JAX CUDA, `jax-triton`, and Triton. The `nrv` extra installs
+NRV and its declared Python dependencies; system FEM dependencies may still
+require the upstream NRV environment on some platforms.
 
 ## First Simulation
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 axon = axs.axons.HodgkinHuxley(
     length=500.0 * axs.um,
@@ -118,13 +121,13 @@ Built-in axon templates include Hodgkin-Huxley, Rattay-Aberham, Sundt,
 Tigerholm, Schild94, Schild97, MRG, and the Gaines motor and sensory
 myelinated families.
 
-Built-in membrane model truth lives in `src/axonscope/membranes/models/`.
+Built-in membrane model truth lives in `src/axonfleet/membranes/models/`.
 User-authored membranes are plain Python classes. Put custom model classes in a
 `.py` file so source inspection and generated-code caching can read their
 definition:
 
 ```python
-from axonscope.membranes.types import CurrentDensity, ResistanceArea, Voltage
+from axonfleet.membranes.types import CurrentDensity, ResistanceArea, Voltage
 
 
 class DemoLeak(axs.membranes.Model):
@@ -178,7 +181,7 @@ instance.add_extracellular_stimulation(stimulation=stimulation)
 
 The analytical point-source helper is a quick-start path. For realistic
 workflows, external tools such as NRV/FEM should generate the field footprint,
-then AxonScope should receive sampled footprint values. See `docs/stimulation.md`
+then AxonFleet should receive sampled footprint values. See `docs/stimulation.md`
 and `examples/with_nrv/01_synthetic_fascicle_geometry.py`.
 
 ## Populations, Recording, And Results
@@ -228,7 +231,7 @@ Runtime selection uses typed public values:
 
 ```python
 policy = axs.ExecutionPolicy(
-    runtime=axs.Runtime.JAX,
+    runtime=axs.runtime.jax,
     device=axs.Device.cpu(),
     precision=axs.PrecisionPolicy.float32(),
 )
@@ -262,13 +265,18 @@ python examples/basic/01_first_intracellular_simulation.py
 python examples/basic/03_point_source_footprint.py
 python examples/basic/05_population_pool_run.py
 python examples/basic/08_recruitment_curve_population.py
-python examples/advanced/runtime/03_pipeline_inspection.py
+python examples/advanced/runtime/02_pipeline_inspection.py
 python examples/advanced/observers/01_vmraster_observer_only.py
 python examples/advanced/protocols/02_recruitment_waveforms.py
 ```
 
 See `examples/README.md` for the full learning path. Benchmark and profiling
 material lives under `benchmark/`, not under public examples.
+
+Persistent generated-code and JAX/Triton artifacts share one deterministic
+tree. Inspect it with `axs.cache.inspect()`, clean known sections with
+`axs.cache.clean()`, relocate it with `AXONFLEET_CACHE=/path`, or disable
+persistence with `AXONFLEET_CACHE=off`. See `docs/cache.md`.
 
 ## Tests And Validation
 
@@ -296,20 +304,17 @@ Benchmarks provide reproducible performance evidence, not scientific
 correctness validation.
 
 ```bash
-python benchmark/runtime/run.py --list
-python benchmark/runtime/run.py --suite smoke
-python benchmark/runtime/run.py --suite model_codegen
-python benchmark/runtime/run.py --suite model_codegen_simulations
-python benchmark/hotpaths/run.py --list
-python benchmark/nrv_performance/run.py --list
+python benchmark/run.py --list
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu
+python benchmark/run.py --script basic_examples --preset quick --platform cpu
 ```
 
 Use:
 
-- `model_codegen` for membrane source/codegen cache and model-step smoke timing;
-- `model_codegen_simulations` for first/warm public template simulations;
-- `hotpaths` only when making timing or memory optimization claims;
-- `tests/nrv` for scientific validation before AxonScope-vs-NRV comparisons.
+- the registered curve and example workloads for timing and memory claims;
+- the focused runtime, membrane, solver, and campaign scripts listed in
+  `benchmark/README.md` for deeper profiling;
+- `tests/nrv` for scientific validation before AxonFleet-vs-NRV comparisons.
 
 Generated outputs live under ignored `benchmark/results/` and
 `benchmark/reports/`. See `benchmark/README.md`.

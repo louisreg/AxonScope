@@ -1,4 +1,4 @@
-"""Plot CPU/GPU time-chunk benchmark matrices for P11B bottleneck triage."""
+"""Plot CPU/GPU time-chunk benchmark matrices for bottleneck triage."""
 
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark/results/p11b_time_chunk_matrix_report"),
+        default=Path("benchmark/results/time_chunk_matrix_report"),
     )
     parser.add_argument("--no-plots", action="store_true")
     args = parser.parse_args(argv)
@@ -744,7 +744,7 @@ def plot_speedup(output: Path, best_rows: Sequence[Mapping[str, Any]], plt: Any,
 
 def write_report(path: Path, rows: Sequence[Mapping[str, Any]], best_rows: Sequence[Mapping[str, Any]], plots: Sequence[Path]) -> None:
     lines = [
-        "# P11B Time-Chunk Matrix Report",
+        "# Time-Chunk Matrix Report",
         "",
         "This report compares time-chunk policies across CPU/GPU, threshold curves,",
         "recruitment curves, and recording modes. It is bottleneck cartography, not",

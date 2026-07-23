@@ -18,15 +18,14 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import axonscope as axs
-from axonscope.benchmarking import benchmark_span
-from axonscope.dispatcher.execution import DispatchSchedulingOptions, run_pool
-from axonscope.dispatcher.plan import build_dispatch_plan
-from axonscope.runtime.execution import (
-    batch_options_for_execution_context,
+import axonfleet as axs
+from axonfleet.benchmarking import benchmark_span
+from axonfleet.dispatcher.execution import DispatchSchedulingOptions, run_pool
+from axonfleet.dispatcher.plan import build_dispatch_plan
+from axonfleet.runtime.execution import (
     execution_context,
 )
-from axonscope.solvers import BatchOptions
+from axonfleet.solvers import BatchOptions
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -171,10 +170,6 @@ def _run_one(
             execution_policy = _execution_policy(args.platform)
             with execution_context(execution_policy, instances=pool) as context:
                 batch_options, observers = _batch_options_and_observers(args)
-                effective_batch_options = batch_options_for_execution_context(
-                    batch_options,
-                    context,
-                )
                 with benchmark_span(
                     "benchmark.run_pool",
                     policy=policy.label,
@@ -188,7 +183,7 @@ def _run_one(
                         pool,
                         tsim_ms=float(args.duration_ms),
                         dt_ms=float(args.dt_ms),
-                        batch_options=effective_batch_options,
+                        batch_options=batch_options,
                         observers=observers,
                         runtime_context=context,
                         dispatch_plan=plan,

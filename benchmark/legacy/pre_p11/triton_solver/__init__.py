@@ -1,2 +1,0 @@
-"""Standalone Triton solver spikes."""
-

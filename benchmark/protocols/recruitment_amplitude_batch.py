@@ -18,14 +18,18 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import axonscope as axs
+import axonfleet as axs
+from axonfleet.axons.templates.mrg_like_double_cable import (
+    mrg_like_node_spacing,
+    mrg_like_nodes_from_length,
+)
 from benchmark.analysis.cache_replay import (
     cache_tree_delta as _cache_tree_delta,
     cache_tree_snapshot as _cache_tree_snapshot,
     ratio as _ratio,
 )
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
-from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
+from axonfleet.benchmarking import benchmark_span, record_benchmark_metadata
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,7 +77,7 @@ RecruitmentWorkload = tuple[
     tuple[axs.AxonInstance, ...],
     Any,
     Any,
-    axs.analysis.ActivationCriterion,
+    axs.analysis.Activation,
 ]
 
 
@@ -83,8 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"), default="cpu")
     parser.add_argument(
         "--workload",
-        choices=("legacy", "p14_realistic"),
-        default="legacy",
+        choices=("smoke", "realistic"),
+        default="smoke",
     )
     parser.add_argument(
         "--cable",
@@ -106,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--axon-count",
         type=int,
-        help="Total axon count; defaults to 196 for p14_realistic.",
+        help="Total axon count; defaults to 196 for the realistic workload.",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
@@ -194,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_workload_args(args: argparse.Namespace) -> None:
-    realistic = args.workload == "p14_realistic"
+    realistic = args.workload == "realistic"
     if args.duration_ms is None:
         args.duration_ms = 3.0 if realistic else 4.0
     if args.dt_ms is None:
@@ -268,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             platform=args.platform,
         )
     if args.disable_batch_membrane_capability:
-        from axonscope.runtime.jax.membranes.backend import (
+        from axonfleet.runtime.jax.membranes.backend import (
             GatedLeakStackMembraneBackend,
         )
 
@@ -324,10 +328,10 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
     if args.cable == "mixed":
         raise SystemExit("--compilation-cache-replay requires one cable route.")
 
-    xla_cache_root = output / "jax_xla_cache"
-    triton_cache_root = output / "triton_kernel_cache"
-    cache_roots = (xla_cache_root, triton_cache_root)
-    if any(root.exists() and any(root.iterdir()) for root in cache_roots):
+    cache_root = output / "persistent_cache"
+    xla_cache_root = cache_root / "runtime" / "jax" / "xla"
+    triton_cache_root = cache_root / "runtime" / "jax" / "triton"
+    if cache_root.exists() and any(cache_root.iterdir()):
         raise SystemExit(
             "--compilation-cache-replay requires a fresh output directory."
         )
@@ -343,11 +347,10 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
         before_xla = _cache_tree_snapshot(xla_cache_root)
         before_triton = _cache_tree_snapshot(triton_cache_root)
         environment = os.environ.copy()
-        environment["AXONSCOPE_JAX_COMPILATION_CACHE"] = str(xla_cache_root)
-        environment["AXONSCOPE_JAX_CACHE_MIN_COMPILE_TIME_S"] = "0"
-        environment["AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] = "-1"
-        environment["AXONSCOPE_JAX_PERSISTENT_XLA_CACHES"] = "all"
-        environment["AXONSCOPE_TRITON_KERNEL_CACHE"] = str(triton_cache_root)
+        environment["AXONFLEET_CACHE"] = str(cache_root)
+        environment["AXONFLEET_JAX_CACHE_MIN_COMPILE_TIME_S"] = "0"
+        environment["AXONFLEET_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] = "-1"
+        environment["AXONFLEET_JAX_PERSISTENT_XLA_CACHES"] = "all"
         environment["JAX_EXPLAIN_CACHE_MISSES"] = "true"
         environment["MPLCONFIGDIR"] = str(child_output / ".matplotlib")
         completed = subprocess.run(
@@ -871,7 +874,7 @@ def _validate_compact_activation_route(run_dir: Path, *, cable: str) -> None:
 def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
     rng = np.random.default_rng(int(args.seed))
     single_count, double_count = _cable_counts(args.cable, int(args.axon_count))
-    realistic = args.workload == "p14_realistic"
+    realistic = args.workload == "realistic"
     circle_radius = (250.0 if realistic else 125.0) * axs.um
     fiber_length = (5_000.0 if realistic else 1_500.0) * axs.um
     stim_start = 0.20 * axs.ms
@@ -973,7 +976,9 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
                 axon_y=y,
                 axon_z=z,
             )
-            extracellular = extracellular.add(static_drive)
+            extracellular = axs.ExtracellularStimulation(
+                (*extracellular.drives, static_drive)
+            )
         row = axs.AxonInstance(axon)
         row.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(row)
@@ -988,7 +993,7 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
         if realistic:
             nodes = max(
                 2,
-                axs.axons.mrg_like_nodes_from_length(
+                mrg_like_nodes_from_length(
                     diameter,
                     fiber_length,
                     x_shift=(
@@ -1061,7 +1066,9 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
                 axon_y=y,
                 axon_z=z,
             )
-            extracellular = extracellular.add(static_drive)
+            extracellular = axs.ExtracellularStimulation(
+                (*extracellular.drives, static_drive)
+            )
         row = axs.AxonInstance(axon)
         row.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(row)
@@ -1093,7 +1100,7 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
         ),
     )
 
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=stim_start,
         target=axs.positions.ALL,
@@ -1157,7 +1164,7 @@ def _mrg_population_templates(
         shift_fraction = float(shift_level) / float(shift_level_count)
         template_diameters[index] = diameter_um
         template_shifts[index] = shift_fraction * float(
-            axs.axons.mrg_like_node_spacing(diameter_um * axs.um)
+            mrg_like_node_spacing(diameter_um * axs.um)
         )
 
     template_indices = np.arange(row_count, dtype=np.int64) % realized_count

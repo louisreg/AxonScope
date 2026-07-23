@@ -8,12 +8,13 @@ from typing import Any
 
 import numpy as np
 
-import axonscope as axs
-from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
-from axonscope.positions import PositionSelector
-from axonscope.results import VM_RASTER_OBSERVATION_KEY, activation_values_from_vm_raster
-from axonscope.signals import MEMBRANE_VOLTAGE, Signal
-from axonscope.utils import units
+import axonfleet as axs
+from axonfleet.benchmarking import benchmark_span, record_benchmark_metadata
+from axonfleet.positions import PositionSelector
+from axonfleet.results import VM_RASTER_OBSERVATION_KEY
+from axonfleet.results.vm_raster import activation_values_from_vm_raster
+from axonfleet.signals import MEMBRANE_VOLTAGE, Signal
+from axonfleet.utils import units
 
 from benchmark.workloads.curve_options import (
     case_name,
@@ -108,13 +109,6 @@ def run_threshold_curves(args: Any) -> int:
 
     options = resolved_options(args)
     _validate_real_run("threshold_curves", options)
-    threshold_kind = str(options.get("threshold_kind", "activation"))
-    if threshold_kind != "activation":
-        raise SystemExit(
-            "Real P11A threshold runs currently support --threshold-kind activation. "
-            "Block thresholds stay in the validated case list until the block protocol "
-            "semantics are defined."
-        )
 
     output = _prepare_output("threshold_curves", options)
     if output is None:
@@ -612,7 +606,6 @@ def _evaluate_amplitudes(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
-        single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
     ):
@@ -665,7 +658,6 @@ def _build_curve_execution_context(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
-        single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
     ):
@@ -1294,25 +1286,14 @@ def _execution_policy(options: dict[str, Any]) -> Any:
 
 
 def _solver_policy(options: dict[str, Any]) -> Any:
-    single_solver = str(options.get("single_cable_solver", "auto"))
     solver = str(options.get("double_cable_block_solver", "auto"))
     platform = str(options.get("platform", "auto"))
     if platform == "cpu":
-        single_cable_solver = axs.runtime.jax.cpu.SingleCableSolver
         double_cable_solver = axs.runtime.jax.cpu.DoubleCableSolver
     elif platform == "gpu":
-        single_cable_solver = axs.runtime.jax.gpu.SingleCableSolver
         double_cable_solver = axs.runtime.jax.gpu.DoubleCableSolver
     else:
-        single_cable_solver = axs.runtime.jax.SingleCableSolver
         double_cable_solver = axs.runtime.jax.DoubleCableSolver
-
-    if single_solver == "auto":
-        single_cable = single_cable_solver.auto()
-    elif single_solver == "jax_tridiagonal":
-        single_cable = single_cable_solver.jax_tridiagonal()
-    else:
-        raise ValueError(f"unsupported single-cable solver policy: {single_solver!r}")
 
     if solver == "auto":
         double_cable = double_cable_solver.auto()
@@ -1329,7 +1310,7 @@ def _solver_policy(options: dict[str, Any]) -> Any:
         )
     else:
         raise ValueError(f"unsupported double-cable solver policy: {solver!r}")
-    return axs.SolverPolicy(single_cable=single_cable, double_cable=double_cable)
+    return axs.SolverPolicy(double_cable=double_cable)
 
 
 def _row_cable(options: dict[str, Any], row: int) -> str:
@@ -1355,9 +1336,9 @@ def _prepare_output(script_name: str, options: dict[str, Any]) -> Path | None:
 
 
 def _validate_real_run(script_name: str, options: dict[str, Any]) -> None:
-    if options["source"] != "point_source_axonscope":
+    if options["source"] != "point_source_axonfleet":
         raise SystemExit(
-            f"{script_name} real runs currently support --source point_source_axonscope. "
+            f"{script_name} real runs currently support --source point_source_axonfleet. "
             "NRV nerve baselines stay in benchmark/baselines/ until their adapter is defined."
         )
     if options["platform"] == "nrv":

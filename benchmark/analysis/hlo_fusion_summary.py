@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Summarize XLA optimized HLO fusions, shape layouts, and rough "
-            "memory pressure from AxonScope lowering artifacts."
+            "memory pressure from AxonFleet lowering artifacts."
         )
     )
     parser.add_argument("inputs", nargs="+", type=Path, help="HLO files or directories to scan.")

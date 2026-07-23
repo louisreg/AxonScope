@@ -6,8 +6,8 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
-import axonscope.runtime.jax.kernels.double_cable as double_cable
-import axonscope.runtime.jax.kernels.single_cable as single_cable
+import axonfleet.runtime.jax.kernels.double_cable as double_cable
+import axonfleet.runtime.jax.kernels.single_cable as single_cable
 from benchmark.analysis.jax_phase_capture import (
     install_production_jax_captures,
 )

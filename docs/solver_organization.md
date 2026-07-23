@@ -1,9 +1,9 @@
 # Solver And Runtime Organization
 
 The solver package owns only stable solver-facing option contracts. The
-runtime-neutral descriptive axon adapter lives under `axonscope.runtime`.
+runtime-neutral descriptive axon adapter lives under `axonfleet.runtime`.
 
-Concrete JAX numerical execution lives under `axonscope.runtime.jax`. That
+Concrete JAX numerical execution lives under `axonfleet.runtime.jax`. That
 runtime receives descriptive axons, compiles them into runtime arrays, lowers
 inputs and observers, and advances state in time. It should not own public model
 construction, pool grouping policy, electrode placement policy, or result
@@ -13,11 +13,11 @@ analysis.
 
 Solver-facing contracts:
 
-- `__init__.py`: stable solver-facing facade only. It exports `SolverOptions`,
-  `BatchOptions`, and `BatchRecording`; kernels, runtimes, and backend solver
+- `__init__.py`: stable solver-facing facade only. It exports `BatchOptions`
+  and `BatchRecording`; kernels, runtimes, and backend solver
   resolvers are not facade exports.
-- `options.py`: solver-owned execution knobs. `SolverOptions` is a reserved
-  numerical preparation contract. `BatchOptions` and `BatchRecording` control
+- `options.py`: solver-owned execution knobs. `BatchOptions` and
+  `BatchRecording` control
   batch-kernel memory, retained Vm columns, and optional time chunking.
   Per-cable solver choice is selected through typed `ExecutionPolicy.solvers`.
 
@@ -75,7 +75,7 @@ JAX runtime implementation:
 Dispatch decides *which axons run together*. Solver code decides *how numerical
 arrays are integrated*. In particular:
 
-- dispatch may pass `SolverOptions` through, but it should not inspect
+- dispatch passes typed execution and batch policies without owning
   runtime-specific numerical details;
 - batch kernels accept arrays such as `Iinj[B, Nt, Nx]` and
   `Vstim[B, Nt, Nx]`;
@@ -225,8 +225,7 @@ backend preparation optimization and must remain independent of a particular
 membrane-model family.
 `runtime/group_preparation.py` owns dispatch-group signatures and
 prepared-cohort caches. `runtime/jax/preparation/caches.py` owns only bounded JAX
-runtime/forcing cache storage, while `runtime/jax/preparation/shape_bucketing.py` owns the
-opt-in double-cable kernel shape bucketing policy and metadata.
+runtime and input-array cache storage.
 
 ### Threshold Observers, Dense/Factorized Vext, And Results
 
@@ -239,7 +238,7 @@ kernels update either bounded activation flags or packed VmRaster output during
 the scan, including one-row `B=1` runs. Activation-only output uses
 `observations["activation"]`; definitions requiring temporal history retain
 `observations["vm_raster"]`. Result containers and CPU conversion live under
-`axonscope.results`, not in solver runtime modules.
+`axonfleet.results`, not in solver runtime modules.
 
 Chunked observer-only batch kernels use local threshold states per chunk. They
 combine activation with boolean OR or assemble VmRaster into one full-duration
@@ -260,19 +259,17 @@ temporal-equivalent stimuli evaluate the current waveform once per time grid
 while keeping row-specific spatial footprints.
 
 Batch outputs become private dispatch row records or compact dispatch cohort
-records in `runtime/result_assembly.py`, then `AxonSimulationResult` at the
+records in `runtime/outputs/assembly.py`, then `AxonSimulationResult` at the
 public `AxonSimulation.run()` boundary. JAX-specific batch result helpers stay
 in `runtime/jax/recording/results.py` for device wait, pending VmRaster
 finalization, and padded kernel-output trim. Post-hoc observer evaluation uses
-the lightweight `runtime/row_output.py` adapter only as a result view, not as an
+the lightweight `runtime/outputs/rows.py` adapter only as a result view, not as an
 execution route.
 
 ## Solver Options
 
-There are two solver option containers and one runtime policy surface:
+There is one solver option container and one runtime policy surface:
 
-- `SolverOptions`: reserved numerical preparation options shared by execution
-  routes.
 - `BatchOptions`: batch-kernel execution options. It carries
   `BatchRecording` and optional `time_chunk_steps`.
 - `ExecutionPolicy.solvers`: typed per-cable solver policy. Use
@@ -301,13 +298,13 @@ and the only explicit CPU route is `axs.runtime.jax.cpu.DoubleCableSolver.thomas
 Non-Thomas CPU double-cable routes are unsupported and should not be kept as
 active runtime choices.
 
-Current cleanup decisions are tracked in
-`docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`.
+Current solver-policy constraints are owned by `GUIDELINES.md` and enforced by
+the runtime policy tests.
 
 Example:
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 policy = axs.ExecutionPolicy(
     runtime=axs.runtime.jax,

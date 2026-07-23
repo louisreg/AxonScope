@@ -1,166 +1,47 @@
 # Benchmark Campaigns
 
-Campaigns group the two canonical curve scripts into reproducible benchmark
-matrices. They should call `benchmark/run.py`; they should not implement solver
-or workload logic directly.
+Campaigns build reproducible matrices around the canonical benchmark scripts.
+They call `benchmark/run.py` in isolated processes and do not implement solver
+or workload logic.
 
-P11A defines the publication campaign as a reproducible plan, not a one-shot
-script yet. The campaign is built only from:
+## Time-Chunk Sweep
 
-- `threshold_curves`;
-- `recruitment_curves`.
-
-## P11A Campaign Plan
-
-| phase | purpose | preset | required axes |
-| --- | --- | --- | --- |
-| acceptance | prove the surface works locally and on Kaggle GPU | `quick`, `gpu_smoke` | threshold, recruitment, CPU, GPU, observer-only |
-| recording modes | quantify output cost | `local_smoke`, future GPU override | observer-only, probe Vm, full Vm |
-| scale curves | map asymptotic behavior | `local_realistic`, `gpu_realistic` | `dt`, `Nx`, `Naxons` |
-| model/cable coverage | expose solver route differences | `local_smoke`, `gpu_smoke` | single-cable, double-cable, mixed populations |
-| cohort coverage | expose batching and heterogeneity cost | `local_smoke`, `gpu_smoke` | same-diameter, different-diameter cohorts |
-| precision | quantify dtype cost and numerical surface | `cpu_publication`, `gpu_realistic` | FP32, FP64 where supported |
-| tracing | inspect optimization targets | `gpu_trace_smoke` | one small pool, two or three amplitudes, selected profile stages |
-| baselines | compare external runtimes | future `nrv_smoke`, `nrv_full` | NRV after adapter contract |
-
-Activation thresholds and recruitment curves are current real-execution
-outputs. Block thresholds stay in the campaign matrix, but must not be executed
-until their protocol semantics are defined. NRV comparison starts only after the
-baseline adapter contract is implemented.
-
-Every campaign must write a manifest with fixed presets, raw data paths, plot
-paths, summary-table paths, git metadata, and hardware metadata.
-
-## P11B Time-Chunk Sweep
-
-Use the time-chunk campaign to compare AxonScope's observer/kernel chunking
-policies without hand-written shell loops. It runs each policy in a separate
-Python process and writes one result directory per policy plus a campaign
-summary table.
-
-Quick local smoke:
+`time_chunk_sweep.py` compares observer/kernel chunk sizes across threshold or
+recruitment workloads. Each policy receives a separate output directory and
+the campaign writes a manifest, merged CSV summary, and Markdown report.
 
 ```bash
 python benchmark/campaigns/time_chunk_sweep.py \
   --script recruitment_curves \
   --preset quick \
   --platform cpu \
-  --policies default,unchunked,100 \
-  --recording observer_only \
-  --amplitude-count 1 \
-  --memory-trace rss \
-  --memory-top-n 0 \
-  --output benchmark/results/p11b_time_chunk_sweep_quick
-```
-
-Recording-mode smoke:
-
-```bash
-python benchmark/campaigns/time_chunk_sweep.py \
-  --script recruitment_curves \
-  --preset quick \
-  --platform cpu \
-  --policies default,unchunked,100 \
+  --policies default,unchunked,50,250,500 \
   --recordings full_vm,probe_vm,observer_only \
-  --amplitude-count 1 \
   --memory-trace rss \
-  --memory-top-n 0 \
-  --output benchmark/results/p11b_time_chunk_recording_smoke
+  --output benchmark/results/time_chunk_sweep
 ```
 
-Bounded P11B sweep shape:
+Use `--recording` for one output mode or `--recordings` for a matrix. Summary
+rows include observed chunk metadata and the runtime preparation, input,
+kernel, observer, Vm materialization, and result-assembly stages.
+
+## Double-Cable Solver Policy
+
+`double_cable_solver_policy.py` validates the typed CPU and GPU double-cable
+policy requests through the threshold and recruitment workloads. It is a
+policy-level acceptance campaign; low-level solver benchmarks only explain
+its results.
 
 ```bash
-python benchmark/campaigns/time_chunk_sweep.py \
-  --script recruitment_curves \
-  --preset quick \
+python benchmark/campaigns/double_cable_solver_policy.py \
   --platform cpu \
-  --policies default,unchunked,50,250,500,1000 \
-  --recording observer_only \
-  --n-axons 1000 \
-  --nx 101 \
-  --tsim 10 \
-  --dt 0.01 \
-  --amplitude-count 5 \
-  --diameters different_diameters \
-  --memory-trace rss \
-  --memory-top-n 0 \
-  --output benchmark/results/p11b_time_chunk_sweep_cpu
-```
-
-The campaign writes `time_chunk_sweep_manifest.json`,
-`time_chunk_sweep_summary.csv`, and `time_chunk_sweep_report.md`. Summary rows
-include the requested policy, the effective benchmark options, observed
-`kernel.dispatch_jax` chunk metadata, `curve.simulate`, `kernel.enqueue`,
-`kernel.dispatch_jax`, `kernel.wait`, `kernel.finalize_observer`, Vm
-materialization, row/cohort assembly, and split-result timings. Use
-`--recording` for one mode and `--recordings` for a matrix across full Vm,
-probe Vm, and observer-only outputs.
-
-## P11 Single-Cable Solver Policy
-
-Use the single-cable policy campaign to compare the current typed public
-single-cable solver surface across CPU/GPU, recording modes, diameters, and
-population sizes. Today `auto` and `jax_tridiagonal` resolve to the same JAX
-route, so this campaign is mostly a CPU/GPU and recording cartography tool.
-
-Quick local smoke:
-
-```bash
-python benchmark/campaigns/single_cable_solver_policy.py \
   --preset quick \
-  --platform cpu \
-  --curve-script recruitment_curves \
-  --solver auto,jax_tridiagonal \
+  --solver auto,thomas \
   --recording observer_only \
-  --n-axons 2 \
-  --nx 21 \
-  --precision fp32 \
-  --diameters same_diameter \
-  --repeats 1 \
-  --warmups 0 \
-  --amplitude-count 1 \
-  --memory-trace off \
-  --output benchmark/results/p11_single_cable_policy_local_smoke
+  --dry-run \
+  --output benchmark/results/double_cable_solver_policy
 ```
 
-Kaggle CPU/GPU policy map shape:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username louisregnacq \
-  --slug p11-single-cable-policy-gpu \
-  --campaign single_cable_solver_policy \
-  --preset gpu_smoke \
-  --platform gpu \
-  --branch main \
-  --output-file-pattern '.*axonscope_benchmark_results.*' \
-  -- \
-  --curve-script recruitment_curves,threshold_curves \
-  --solver auto,jax_tridiagonal \
-  --recording observer_only,probe_vm \
-  --n-axons 1024,4096,8192 \
-  --nx 89 \
-  --precision fp32 \
-  --diameters same_diameter,different_diameters \
-  --tsim 2.0 \
-  --dt 0.02 \
-  --repeats 5 \
-  --warmups 1 \
-  --amplitude-count 3 \
-  --memory-trace off \
-  --repeat-pool-policy reuse \
-  --keep-going
-```
-
-## Publication Outputs
-
-Publication runs should retain:
-
-- raw result directories from every command;
-- a campaign manifest with exact commands, presets, git SHA, and hardware;
-- merged timing and memory tables derived from `summary.csv` and
-  `memory_summary.csv`;
-- curve tables derived from `curve_summary.csv`;
-- plots for threshold curves, recruitment curves, and scale trends;
-- trace summaries only from tiny trace cases, never from full campaign sweeps.
+On GPU, use `--solver auto,tiled_thomas` and optionally vary
+`--tiled-thomas-block-b`. Every retained result must include the generated
+manifest, raw child outputs, git metadata, and hardware metadata.

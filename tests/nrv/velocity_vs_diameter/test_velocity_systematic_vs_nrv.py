@@ -12,9 +12,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonInstance, degC, mV, ms, um
-from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
-from axonscope.axons.unmyelinated import (
+from axonfleet import AxonInstance, degC, mV, ms, um
+from axonfleet.axons.myelinated import GainesMotor, GainesSensory, MRG
+from axonfleet.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
     Schild94,
@@ -22,23 +22,21 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.analysis import conduction_velocity
-from axonscope.stimulation import Stimulus
+from axonfleet.analysis import ConductionVelocity
+from axonfleet.stimulation import Stimulus
 from tests.helpers import FakeSingleAxonResult
 from tests.nrv._helpers import (
     align_rows_to_target_x,
-    axonscope_x_um,
+    axonfleet_x_um,
     crossing_times,
     interp_rows,
     normalize_nrv_matrix,
-    run_axonscope_simulation,
+    run_axonfleet_simulation,
     select_nearest_rows,
     symmetric_crossing_curve,
     velocity_from_crossing_times,
     velocity_from_peak_times,
 )
-
-pytestmark = pytest.mark.nrv_velocity
 
 FIG_DIR = Path("figures/nrv_tests/velocity_vs_diameter")
 VELOCITY_RTOL = 0.02
@@ -48,7 +46,7 @@ VELOCITY_RTOL = 0.02
 class VelocitySpec:
     name: str
     diameters_um: tuple[float, ...]
-    axonscope_factory: Callable[[float], object]
+    axonfleet_factory: Callable[[float], object]
     nrv_factory: Callable[[float, object, float], object]
     tsim_ms: float
     dt_ms: float
@@ -63,9 +61,9 @@ class VelocitySpec:
     vm_rmse_tolerance_mV: float | None = None
 
 
-def _axonscope_matrix(axon, res, mode: Literal["all", "nodes"]) -> tuple[np.ndarray, np.ndarray]:
+def _axonfleet_matrix(axon, res, mode: Literal["all", "nodes"]) -> tuple[np.ndarray, np.ndarray]:
     vm = np.asarray(res.Vm, dtype=float).T
-    x = axonscope_x_um(axon)
+    x = axonfleet_x_um(axon)
     if mode == "all":
         return x, vm
     idx = np.asarray(axon.node_indices, dtype=int)
@@ -96,7 +94,7 @@ def _nrv_matrix(
 
 def _mrg_stim_position(axon: MRG) -> float:
     center_node = int(axon.node_indices.shape[0] // 2)
-    return float(axonscope_x_um(axon)[int(np.asarray(axon.node_indices)[center_node])])
+    return float(axonfleet_x_um(axon)[int(np.asarray(axon.node_indices)[center_node])])
 
 
 def _velocity_from_symmetric_distances(
@@ -155,11 +153,10 @@ def _velocity_from_rasterized_matrix(
         np.asarray(t_ms, dtype=float),
     )
     return float(
-        conduction_velocity(
-            result,
-            threshold_mV=threshold_mV,
-            min_distance_ms=min_distance_ms,
-        )
+        ConductionVelocity(
+            threshold=threshold_mV,
+            min_distance=min_distance_ms,
+        ).detect(result)
     )
 
 
@@ -339,7 +336,7 @@ SPECS = [
     VelocitySpec(
         name="hh",
         diameters_um=(0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        axonscope_factory=_make_hh_axon,
+        axonfleet_factory=_make_hh_axon,
         nrv_factory=_make_hh_nrv,
         tsim_ms=10.0,
         dt_ms=0.001,
@@ -352,7 +349,7 @@ SPECS = [
     VelocitySpec(
         name="rattay",
         diameters_um=(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        axonscope_factory=_make_rattay_axon,
+        axonfleet_factory=_make_rattay_axon,
         nrv_factory=_make_rattay_nrv,
         tsim_ms=12.0,
         dt_ms=0.005,
@@ -365,7 +362,7 @@ SPECS = [
     VelocitySpec(
         name="sundt",
         diameters_um=(0.5, 0.6, 0.8, 1.0),
-        axonscope_factory=_make_sundt_axon,
+        axonfleet_factory=_make_sundt_axon,
         nrv_factory=_make_sundt_nrv,
         tsim_ms=10.0,
         dt_ms=0.001,
@@ -378,7 +375,7 @@ SPECS = [
     VelocitySpec(
         name="tigerholm",
         diameters_um=(0.5, 0.8, 1.0, 1.2),
-        axonscope_factory=_make_tigerholm_axon,
+        axonfleet_factory=_make_tigerholm_axon,
         nrv_factory=_make_tigerholm_nrv,
         tsim_ms=30.0,
         dt_ms=0.025,
@@ -391,7 +388,7 @@ SPECS = [
     VelocitySpec(
         name="schild94",
         diameters_um=(0.6, 0.7, 0.8, 0.9, 1.0),
-        axonscope_factory=_make_schild94_axon,
+        axonfleet_factory=_make_schild94_axon,
         nrv_factory=_make_schild94_nrv,
         tsim_ms=12.0,
         dt_ms=0.005,
@@ -404,7 +401,7 @@ SPECS = [
     VelocitySpec(
         name="schild97",
         diameters_um=(0.6, 0.7, 0.8, 0.9, 1.0),
-        axonscope_factory=_make_schild97_axon,
+        axonfleet_factory=_make_schild97_axon,
         nrv_factory=_make_schild97_nrv,
         tsim_ms=12.0,
         dt_ms=0.005,
@@ -417,7 +414,7 @@ SPECS = [
     VelocitySpec(
         name="mrg",
         diameters_um=(5.7, 10.0, 14.0),
-        axonscope_factory=_make_mrg_axon,
+        axonfleet_factory=_make_mrg_axon,
         nrv_factory=_make_mrg_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -431,7 +428,7 @@ SPECS = [
     VelocitySpec(
         name="gaines_motor",
         diameters_um=(5.7, 10.0, 14.0),
-        axonscope_factory=_make_gaines_motor_axon,
+        axonfleet_factory=_make_gaines_motor_axon,
         nrv_factory=_make_gaines_motor_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -447,7 +444,7 @@ SPECS = [
     VelocitySpec(
         name="gaines_sensory",
         diameters_um=(5.7, 10.0, 14.0),
-        axonscope_factory=_make_gaines_sensory_axon,
+        axonfleet_factory=_make_gaines_sensory_axon,
         nrv_factory=_make_gaines_sensory_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -482,7 +479,7 @@ def _plot_velocity_report(
 
     fig, axs = plt.subplots(2, 2, figsize=(15, 10), constrained_layout=True)
 
-    axs[0, 0].plot(diameters_um, vel_as, "o-", lw=2, label="AxonScope")
+    axs[0, 0].plot(diameters_um, vel_as, "o-", lw=2, label="AxonFleet")
     axs[0, 0].plot(diameters_um, vel_nrv, "s--", lw=2, label="NRV")
     axs[0, 0].set_title(f"{spec.name} velocity vs diameter")
     axs[0, 0].set_xlabel("Diameter [um]")
@@ -506,7 +503,7 @@ def _plot_velocity_report(
         extent=[float(rep_t_as[0]), float(rep_t_as[-1]), float(rep_x_um[0]), float(rep_x_um[-1])],
         cmap="viridis",
     )
-    axs[1, 0].set_title("Representative AxonScope Vm heatmap")
+    axs[1, 0].set_title("Representative AxonFleet Vm heatmap")
     axs[1, 0].set_xlabel("Time [ms]")
     axs[1, 0].set_ylabel("Position [um]")
     fig.colorbar(im0, ax=axs[1, 0], label="Vm [mV]")
@@ -518,7 +515,7 @@ def _plot_velocity_report(
         extent=[float(rep_t_as[0]), float(rep_t_as[-1]), float(rep_x_um[0]), float(rep_x_um[-1])],
         cmap="viridis",
     )
-    axs[1, 1].set_title("Representative NRV Vm heatmap (aligned on AxonScope x)")
+    axs[1, 1].set_title("Representative NRV Vm heatmap (aligned on AxonFleet x)")
     axs[1, 1].set_xlabel("Time [ms]")
     axs[1, 1].set_ylabel("Position [um]")
     fig.colorbar(im1, ax=axs[1, 1], label="Vm [mV]")
@@ -530,7 +527,7 @@ def _plot_velocity_report(
             np.max(np.abs(np.asarray(x_um, dtype=float) - float(center_x_um)))
         )
         for crossings, marker, linestyle, label in (
-            (tc_as, "o", "-", "AxonScope"),
+            (tc_as, "o", "-", "AxonFleet"),
             (tc_nrv, "s", "--", "NRV"),
         ):
             dist, crossing = symmetric_crossing_curve(
@@ -572,15 +569,15 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
     rep_velocity_payload = None
 
     for i, d in enumerate(spec.diameters_um):
-        axon = spec.axonscope_factory(float(d))
-        res = run_axonscope_simulation(axon, tsim=spec.tsim_ms, dt=spec.dt_ms)
+        axon = spec.axonfleet_factory(float(d))
+        res = run_axonfleet_simulation(axon, tsim=spec.tsim_ms, dt=spec.dt_ms)
 
         axon_nrv = spec.nrv_factory(float(d), axon, spec.dt_ms)
         results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)
 
         center_x_um = float(getattr(axon, "comparison_sample_position_um", axon.length / 2.0))
 
-        x_as_vel, vm_as_vel = _axonscope_matrix(axon, res, spec.velocity_mode)
+        x_as_vel, vm_as_vel = _axonfleet_matrix(axon, res, spec.velocity_mode)
         x_nrv_vel, vm_nrv_vel, t_nrv = _nrv_matrix(
             results_nrv,
             spec.velocity_mode,
@@ -676,12 +673,12 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
                 exclude_radius_um=spec.exclude_radius_um,
             )
 
-        print(f"{spec.name} d={d:.3f} um | AxonScope={v_as:.4f} m/s | NRV={v_nrv:.4f} m/s")
+        print(f"{spec.name} d={d:.3f} um | AxonFleet={v_as:.4f} m/s | NRV={v_nrv:.4f} m/s")
         vel_as.append(v_as)
         vel_nrv.append(v_nrv)
 
         if i == spec.representative_index:
-            x_as_plot, vm_as_plot = _axonscope_matrix(axon, res, spec.plot_mode)
+            x_as_plot, vm_as_plot = _axonfleet_matrix(axon, res, spec.plot_mode)
             _, vm_nrv_plot, _ = _nrv_matrix(
                 results_nrv,
                 spec.plot_mode,

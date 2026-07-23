@@ -31,7 +31,7 @@ SCRIPTS = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run AxonScope benchmark scripts.")
+    parser = argparse.ArgumentParser(description="Run AxonFleet benchmark scripts.")
     parser.add_argument("--list", action="store_true", help="List scripts and presets.")
     parser.add_argument("--script", choices=tuple(SCRIPTS), help="Benchmark script to run.")
     parser.add_argument("--preset", default="quick", choices=tuple(PRESETS))

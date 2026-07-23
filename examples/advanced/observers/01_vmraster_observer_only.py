@@ -3,9 +3,9 @@
 Run:
     python examples/advanced/observers/01_vmraster_observer_only.py
 
-The previous example keeps Vm and evaluates analyses post-hoc. This one uses
-`Recording.none()` plus solver-side threshold observers, so the result keeps a
-packed VmRaster instead of a dense Vm recording.
+This example uses `Recording.none()` plus solver-side threshold observers, so
+the result keeps a packed VmRaster instead of a dense Vm recording. The
+recording-analysis examples show the complementary post-hoc path.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:

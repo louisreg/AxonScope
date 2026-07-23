@@ -13,7 +13,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -45,27 +45,27 @@ def main() -> None:
 
     # Step 3: evaluate the same threshold at different typed targets.
     criteria = {
-        "anywhere": axs.analysis.ActivationCriterion(
+        "anywhere": axs.analysis.Activation(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.ALL,
         ),
-        "proximal": axs.analysis.ActivationCriterion(
+        "proximal": axs.analysis.Activation(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.PROXIMAL,
         ),
-        "center": axs.analysis.ActivationCriterion(
+        "center": axs.analysis.Activation(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.CENTER,
         ),
-        "distal": axs.analysis.ActivationCriterion(
+        "distal": axs.analysis.Activation(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.DISTAL,
         ),
-        "near clamp": axs.analysis.ActivationCriterion(
+        "near clamp": axs.analysis.Activation(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.At(60.0 * axs.um),
@@ -74,7 +74,7 @@ def main() -> None:
 
     # Step 4: print compact event summaries.
     for label, criterion in criteria.items():
-        event = criterion.evaluate(result)
+        event = criterion.detect(result)
         print(
             f"{label}: activated={event.activated}, "
             f"index={event.first_index}, "

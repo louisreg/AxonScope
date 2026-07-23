@@ -8,18 +8,17 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.axons import Axon, Layout, LayoutElement, Section
-from axonscope.membranes.models.nav_balbi import BalbiNav
-from axonscope.runtime.jax.membranes.compile import (
+import axonfleet as axs
+from axonfleet.axons import Axon, Layout, LayoutElement, Section
+from axonfleet.membranes.models.nav_balbi import BalbiNav
+from axonfleet.runtime.jax.membranes.compile import (
     compile_axon_membrane,
     compile_membrane_model,
 )
-from axonscope.runtime.jax.membranes.kinetics import (
+from axonfleet.runtime.jax.membranes.kinetics import (
     solve_kinetic_step,
 )
-from axonscope.runtime.jax.membranes.program import is_jax_membrane_program_kind
-from axonscope.runtime.solver_axon import build_solver_axon
+from axonfleet.runtime.solver_axon import build_solver_axon
 
 
 NAV_MODELS = (
@@ -123,7 +122,7 @@ def test_nav_isoforms_share_one_generated_source_artifact():
         model_class.kind_name() for model_class in NAV_MODELS
     }
     for model_class, program in zip(NAV_MODELS, programs, strict=True):
-        assert is_jax_membrane_program_kind(program, model_class.kind_name())
+        assert program.model_name == model_class.kind_name()
         assert program.gate_names() == tuple(
             f"{model_class.kind_name()}.{state}"
             for state in ("C1", "C2", "O1", "O2", "I1", "I2")

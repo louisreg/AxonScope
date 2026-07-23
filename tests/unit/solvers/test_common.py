@@ -4,20 +4,16 @@ import jax
 import numpy as np
 import jax.numpy as jnp
 
-from axonscope.runtime.jax.kernels.block_tridiagonal import (
+from axonfleet.runtime.jax.kernels.block_tridiagonal import (
     solve_block_tridiagonal_2x2_scalar,
 )
-from axonscope.runtime.jax.cable_geometry import (
+from axonfleet.runtime.jax.cable_geometry import (
     apply_diffusion_operator,
-    diffusion_operator_coeffs,
 )
-from axonscope.runtime.jax.kernels.double_cable_linear import (
+from axonfleet.runtime.host_preparation import diffusion_operator_coeffs_numpy
+from axonfleet.runtime.jax.kernels.double_cable_linear import (
     DoubleCableLinearSystemStaticTermsXB,
-    assemble_double_cable_linear_system,
     assemble_double_cable_linear_system_xb,
-    double_cable_space_from_xb,
-    double_cable_space_to_xb,
-    prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
     solve_double_cable_physical_system_jax_triton_loop_xb,
 )
@@ -80,9 +76,13 @@ def test_non_uniform_diffusion_operator_matches_quadratic_second_derivative():
 
     axon = _uniform_cable_namespace(x_um=x_um, diffusion_coefficient=D)
 
-    lower, diag, upper = diffusion_operator_coeffs(axon, jnp.float32)
+    lower, diag, upper = diffusion_operator_coeffs_numpy(
+        axon,
+        dtype=np.dtype("float32"),
+    )
+    lower, diag, upper = map(jnp.asarray, (lower, diag, upper))
     V = x_cm ** 2
-    diffusion = apply_diffusion_operator(V, lower, diag, upper)
+    diffusion = apply_diffusion_operator(V, lower, upper)
     np.testing.assert_allclose(np.asarray(diffusion)[1:-1], 2.0 * D, atol=2e-5, rtol=0.0)
 
 
@@ -93,8 +93,12 @@ def test_sealed_end_diffusion_operator_keeps_constant_profile_constant():
 
     axon = _uniform_cable_namespace(x_um=x_um, diffusion_coefficient=0.3)
 
-    lower, diag, upper = diffusion_operator_coeffs(axon, jnp.float32)
-    diffusion = apply_diffusion_operator(V, lower, diag, upper)
+    lower, diag, upper = diffusion_operator_coeffs_numpy(
+        axon,
+        dtype=np.dtype("float32"),
+    )
+    lower, diag, upper = map(jnp.asarray, (lower, diag, upper))
+    diffusion = apply_diffusion_operator(V, lower, upper)
     np.testing.assert_allclose(np.asarray(diffusion), 0.0, atol=1e-7, rtol=0.0)
 
 
@@ -136,8 +140,8 @@ def test_scalar_block_tridiagonal_solver_matches_generic_2x2_solver():
 def test_double_cable_linear_system_assembly_matches_explicit_formula():
     batch_size = 3
     n = 5
-    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
-    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[None, :]
+    x = jnp.arange(n, dtype=jnp.float32)[:, None]
 
     Vi = -70.0 + 0.2 * batch + 0.1 * x
     Ve = 0.5 * batch - 0.05 * x
@@ -161,7 +165,7 @@ def test_double_cable_linear_system_assembly_matches_explicit_formula():
     background = jnp.zeros((n,), dtype=jnp.float32)
     dt_ms = jnp.asarray(0.01, dtype=jnp.float32)
 
-    static = prepare_double_cable_linear_system_static_terms(
+    static = prepare_double_cable_linear_system_static_terms_xb(
         area_cm2=area,
         Cm_abs=Cm_abs,
         Cx_abs=Cx_abs,
@@ -177,7 +181,7 @@ def test_double_cable_linear_system_assembly_matches_explicit_formula():
         batch_size=batch_size,
         nx=n,
     )
-    system = assemble_double_cable_linear_system(
+    system = assemble_double_cable_linear_system_xb(
         Vi=Vi,
         Ve=Ve,
         Gm_abs=Gm_abs,
@@ -189,24 +193,39 @@ def test_double_cable_linear_system_assembly_matches_explicit_formula():
         extracellular_drive_abs=extracellular_drive_abs,
     )
 
-    cm_over_dt = Cm_abs[None, :] / dt_ms
-    cx_over_dt = Cx_abs[None, :] / dt_ms
+    cm_over_dt = Cm_abs[:, None] / dt_ms
+    cx_over_dt = Cx_abs[:, None] / dt_ms
     vm = Vi - Ve
     membrane_charge = cm_over_dt * vm
     np.testing.assert_allclose(
         np.asarray(system.a00),
-        np.asarray(cm_over_dt + left_i[None, :] + right_i[None, :] + Gm_abs),
+        np.asarray(cm_over_dt + left_i[:, None] + right_i[:, None] + Gm_abs),
         rtol=1e-6,
     )
     np.testing.assert_allclose(np.asarray(system.a01), np.asarray(-(cm_over_dt + Gm_abs)), rtol=1e-6)
     np.testing.assert_allclose(np.asarray(system.a10), np.asarray(system.a01), rtol=1e-6)
     np.testing.assert_allclose(
         np.asarray(system.a11),
-        np.asarray(cm_over_dt + cx_over_dt + Gx_abs[None, :] + left_e[None, :] + right_e[None, :] + Gm_abs),
+        np.asarray(
+            cm_over_dt
+            + cx_over_dt
+            + Gx_abs[:, None]
+            + left_e[:, None]
+            + right_e[:, None]
+            + Gm_abs
+        ),
         rtol=1e-6,
     )
-    np.testing.assert_allclose(np.asarray(system.off0), np.asarray(-Gax_i), rtol=1e-6)
-    np.testing.assert_allclose(np.asarray(system.off1), np.asarray(-Gax_e), rtol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(system.off0),
+        np.broadcast_to(np.asarray(-Gax_i[:, None]), (n - 1, batch_size)),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(system.off1),
+        np.broadcast_to(np.asarray(-Gax_e[:, None]), (n - 1, batch_size)),
+        rtol=1e-6,
+    )
     np.testing.assert_allclose(
         np.asarray(system.rhs0),
         np.asarray(membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs),
@@ -224,104 +243,8 @@ def test_double_cable_linear_system_assembly_matches_explicit_formula():
         ),
         rtol=1e-6,
     )
-
-
-def test_double_cable_linear_system_xb_assembly_matches_batch_first():
-    batch_size = 3
-    n = 5
-    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
-    x = jnp.arange(n, dtype=jnp.float32)[None, :]
-
-    static = prepare_double_cable_linear_system_static_terms(
-        area_cm2=jnp.linspace(1.0, 1.2, n, dtype=jnp.float32),
-        Cm_abs=jnp.linspace(0.08, 0.12, n, dtype=jnp.float32),
-        Cx_abs=jnp.linspace(0.02, 0.03, n, dtype=jnp.float32),
-        Gx_abs=jnp.linspace(0.004, 0.006, n, dtype=jnp.float32),
-        Gax_e=jnp.linspace(0.05, 0.07, n - 1, dtype=jnp.float32),
-        Gax_i=jnp.linspace(0.2, 0.3, n - 1, dtype=jnp.float32),
-        left_i=jnp.linspace(0.1, 0.2, n, dtype=jnp.float32),
-        right_i=jnp.linspace(0.15, 0.25, n, dtype=jnp.float32),
-        left_e=jnp.linspace(0.01, 0.02, n, dtype=jnp.float32),
-        right_e=jnp.linspace(0.012, 0.022, n, dtype=jnp.float32),
-        I_background=jnp.zeros((n,), dtype=jnp.float32),
-        dt_ms=jnp.asarray(0.01, dtype=jnp.float32),
-        batch_size=batch_size,
-        nx=n,
-    )
-    static_xb = prepare_double_cable_linear_system_static_terms_xb(
-        area_cm2=jnp.linspace(1.0, 1.2, n, dtype=jnp.float32),
-        Cm_abs=jnp.linspace(0.08, 0.12, n, dtype=jnp.float32),
-        Cx_abs=jnp.linspace(0.02, 0.03, n, dtype=jnp.float32),
-        Gx_abs=jnp.linspace(0.004, 0.006, n, dtype=jnp.float32),
-        Gax_e=jnp.linspace(0.05, 0.07, n - 1, dtype=jnp.float32),
-        Gax_i=jnp.linspace(0.2, 0.3, n - 1, dtype=jnp.float32),
-        left_i=jnp.linspace(0.1, 0.2, n, dtype=jnp.float32),
-        right_i=jnp.linspace(0.15, 0.25, n, dtype=jnp.float32),
-        left_e=jnp.linspace(0.01, 0.02, n, dtype=jnp.float32),
-        right_e=jnp.linspace(0.012, 0.022, n, dtype=jnp.float32),
-        I_background=jnp.zeros((n,), dtype=jnp.float32),
-        dt_ms=jnp.asarray(0.01, dtype=jnp.float32),
-        batch_size=batch_size,
-        nx=n,
-    )
-    for name in (
-        "area",
-        "cm_over_dt",
-        "cx_over_dt",
-        "cx_plus_gx",
-        "a00_static",
-        "a11_static",
-        "background_abs",
-        "zero_abs",
-    ):
-        np.testing.assert_allclose(
-            np.asarray(double_cable_space_from_xb(getattr(static_xb, name))),
-            np.asarray(getattr(static, name)),
-            rtol=1e-6,
-        )
-    values = {
-        "Vi": -70.0 + 0.2 * batch + 0.1 * x,
-        "Ve": 0.5 * batch - 0.05 * x,
-        "Gm_abs": 0.02 + 0.001 * x + 0.0002 * batch,
-        "GE_abs": -1.0 + 0.02 * x,
-        "Iinj_abs": 0.01 * batch + 0.002 * x,
-        "I_outward_abs": 0.003 * x,
-        "I_corr_abs": 0.001 * batch,
-        "extracellular_drive_abs": 0.04 + 0.005 * x,
-    }
-
-    system = assemble_double_cable_linear_system(static=static, **values)
-    system_xb = assemble_double_cable_linear_system_xb(
-        static=static_xb,
-        **{
-            key: double_cable_space_to_xb(value, batch_size=batch_size, nx=n)
-            for key, value in values.items()
-        },
-    )
-
-    for name in system._fields:
-        batch_first = getattr(system, name)
-        node_first = getattr(system_xb, name)
-        if name in {"off0", "off1"}:
-            np.testing.assert_allclose(
-                np.asarray(node_first),
-                np.broadcast_to(
-                    np.asarray(batch_first)[:, None],
-                    np.asarray(node_first).shape,
-                ),
-                rtol=1e-6,
-            )
-        else:
-            converted = double_cable_space_from_xb(node_first)
-            np.testing.assert_allclose(
-                np.asarray(converted),
-                np.asarray(batch_first),
-                rtol=1e-6,
-            )
-
-
 def test_double_cable_triton_boundary_can_retain_node_first(monkeypatch):
-    from axonscope.runtime.jax.kernels import triton_double_cable
+    from axonfleet.runtime.jax.kernels import triton_double_cable
 
     nx = 4
     batch_size = 3

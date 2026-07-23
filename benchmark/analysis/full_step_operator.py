@@ -1,4 +1,4 @@
-"""Prove the block-elimination structure of one frozen AxonScope time step."""
+"""Prove the block-elimination structure of one frozen AxonFleet time step."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from axonscope.runtime.jax.kernels.block_tridiagonal import (
+from axonfleet.runtime.jax.kernels.block_tridiagonal import (
     solve_block_tridiagonal_2x2_scalar,
 )
-from axonscope.runtime.jax.kernels.single_cable_scans import (
+from axonfleet.runtime.jax.kernels.single_cable_scans import (
     _solve_single_cable_tridiagonal_jax_row,
 )
-from axonscope.runtime.jax.membranes.kinetics import (
+from axonfleet.runtime.jax.membranes.kinetics import (
     dense_kinetic_matrix,
     solve_kinetic_transitions,
 )

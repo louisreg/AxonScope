@@ -5,7 +5,7 @@ import json
 import jax
 import numpy as np
 
-from axonscope.runtime.jax.kernels import triton_call_cache
+from axonfleet.runtime.jax.kernels import triton_call_cache
 
 
 def _payload(*, name: str = "test_kernel", source_hash: str = "source"):
@@ -28,15 +28,15 @@ def _payload(*, name: str = "test_kernel", source_hash: str = "source"):
     )
 
 
-def test_triton_cache_root_defaults_under_axonscope_cache(
+def test_triton_cache_root_defaults_under_axonfleet_cache(
     monkeypatch,
     tmp_path,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AXONSCOPE_TRITON_KERNEL_CACHE", raising=False)
+    monkeypatch.delenv("AXONFLEET_CACHE", raising=False)
 
     assert triton_call_cache._triton_cache_root() == (
-        tmp_path / ".axonscope_cache" / "runtime" / "jax" / "triton"
+        tmp_path / ".axonfleet_cache" / "runtime" / "jax" / "triton"
     )
 
 
@@ -45,9 +45,11 @@ def test_triton_cache_root_honors_environment_override(
     tmp_path,
 ) -> None:
     configured = tmp_path / "compiled"
-    monkeypatch.setenv("AXONSCOPE_TRITON_KERNEL_CACHE", str(configured))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(configured))
 
-    assert triton_call_cache._triton_cache_root() == configured
+    assert triton_call_cache._triton_cache_root() == (
+        configured / "runtime" / "jax" / "triton"
+    )
 
 
 def test_triton_cache_artifact_round_trip(tmp_path) -> None:

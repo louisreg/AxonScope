@@ -6,18 +6,17 @@ import json
 import numpy as np
 import pytest
 
-import axonscope.runtime.benchmarking as instrumentation
-from axonscope.benchmarking import (
+import axonfleet.runtime.benchmarking as instrumentation
+from axonfleet.benchmarking import (
     benchmark,
-    benchmark_array_metadata,
     benchmark_report,
     benchmark_span,
-    benchmark_wait,
     disable_benchmark,
     enable_benchmark,
     record_benchmark_metadata,
     reset_benchmark,
 )
+from axonfleet.runtime.benchmarking import benchmark_array_metadata, benchmark_wait
 
 
 def test_session_records_nested_events_and_writes_files(tmp_path):
@@ -258,11 +257,11 @@ def test_named_profile_captures_only_first_matching_span(tmp_path, monkeypatch):
     handle = object()
 
     monkeypatch.setattr(
-        "axonscope.runtime.execution.benchmark_profile_start",
+        "axonfleet.runtime.execution.benchmark_profile_start",
         lambda runtime, output, **options: calls.append(("start", str(output))) or handle,
     )
     monkeypatch.setattr(
-        "axonscope.runtime.execution.benchmark_profile_stop",
+        "axonfleet.runtime.execution.benchmark_profile_stop",
         lambda received: calls.append(("stop", received)) or {"stopped": True},
     )
 

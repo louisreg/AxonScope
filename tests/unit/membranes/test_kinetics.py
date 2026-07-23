@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from axonscope.runtime.jax.membranes.kinetics import (
+from axonfleet.runtime.jax.membranes.kinetics import (
     dense_kinetic_matrix,
     solve_conserved_kinetic_step,
     solve_kinetic_transitions,

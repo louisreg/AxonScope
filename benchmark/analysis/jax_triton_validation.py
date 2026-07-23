@@ -21,7 +21,7 @@ def validate_double_cable_tiled_thomas(
     import jax
     import jax.numpy as jnp
 
-    from axonscope.runtime.jax.kernels.triton_double_cable import (
+    from axonfleet.runtime.jax.kernels.triton_double_cable import (
         solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb,
     )
 

@@ -18,9 +18,9 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import axonscope as axs
+import axonfleet as axs
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
-from axonscope.benchmarking import benchmark_span
+from axonfleet.benchmarking import benchmark_span
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -65,11 +65,6 @@ EXAMPLES = {
         path=REPO_ROOT / "examples" / "with_nrv" / "01_synthetic_fascicle_geometry.py",
         label="synthetic_fascicle_geometry",
     ),
-    "02": ExampleSpec(
-        key="02",
-        path=REPO_ROOT / "examples" / "with_nrv" / "02_realistic_fascicle_geometry.py",
-        label="realistic_fascicle_geometry",
-    ),
 }
 
 
@@ -77,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", default="quick")
     parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"), default="cpu")
-    parser.add_argument("--examples", default="01,02")
+    parser.add_argument("--examples", default="01")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument("--cold-only", action="store_true")
@@ -225,7 +220,7 @@ def _parse_observer_time_chunk_steps(value: str) -> int | None:
 
 
 def _load_example(spec: ExampleSpec):
-    module_name = f"_axonscope_with_nrv_example_{spec.key}_{spec.label}"
+    module_name = f"_axonfleet_with_nrv_example_{spec.key}_{spec.label}"
     spec_obj = importlib.util.spec_from_file_location(module_name, spec.path)
     if spec_obj is None or spec_obj.loader is None:
         raise RuntimeError(f"Could not load {spec.path}.")

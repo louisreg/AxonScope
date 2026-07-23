@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -74,7 +74,7 @@ def main() -> None:
 
     # Step 10: indexing returns a one-axon view in the original pool order.
     first = results[0]
-    second = results.axon(1)
+    second = results[1]
     print(f"first view input index: {first.index}")
     print(f"second view input index: {second.index}")
 

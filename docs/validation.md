@@ -1,6 +1,6 @@
 # Validation
 
-AxonScope separates fast checks from local scientific validation.
+AxonFleet separates fast checks from local scientific validation.
 
 ## Fast Checks
 
@@ -51,14 +51,15 @@ MPLBACKEND=Agg python -m pytest -q tests/nrv/intracellular tests/nrv/velocity_vs
 
 - `tests/unit` guards public API behavior, solver runtime preparation, batch
   execution, units, stimulation, recording, and guardrails.
-- `tests/nrv/extracellular` checks point-source stimulation and MRG/unmyelinated
-  extracellular behavior against NRV.
-- `tests/nrv/numerics` checks morphology, compartment geometry, boundary
-  conditions, and solver numerics against NRV-adjacent references.
+- `tests/nrv/extracellular` runs the systematic point-source campaign across
+  every supported NRV-backed membrane family, including Vm, gates, currents,
+  states, conductances, and sampled extracellular fields.
+- `tests/nrv/numerics` checks MRG morphology and compartment geometry, MRG node
+  delays, Gaines kinetics/defaults, and the passive-current definition.
 - `tests/nrv/intracellular` checks membrane dynamics and observable traces
   against NRV.
 - `tests/nrv/velocity_vs_diameter` checks conduction velocity trends and
-  AxonScope/NRV velocity agreement.
+  AxonFleet/NRV velocity agreement.
 - Hotpath and realistic benchmark suites are evidence for performance claims.
   Re-run them when making a timing or memory claim, not for every architecture
   or documentation cleanup.

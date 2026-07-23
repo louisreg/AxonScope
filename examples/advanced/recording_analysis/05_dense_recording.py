@@ -6,7 +6,7 @@ Run:
 
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def _stimulated_hh(amplitude_na: float) -> axs.AxonInstance:

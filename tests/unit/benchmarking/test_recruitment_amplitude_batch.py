@@ -7,16 +7,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import axonscope as axs
+import axonfleet as axs
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
 from benchmark.protocols import recruitment_amplitude_batch
-from axonscope.dispatcher import build_dispatch_plan
-from axonscope.preparation.cohort import PreparedCohort
+from axonfleet.dispatcher.plan import build_dispatch_plan
+from axonfleet.preparation.cohort import PreparedCohort
 
 
-def test_p14_realistic_defaults_match_reference_workload() -> None:
+def test_realistic_defaults_match_reference_workload() -> None:
     args = recruitment_amplitude_batch.build_parser().parse_args(
-        ["--workload", "p14_realistic", "--cable", "double"]
+        ["--workload", "realistic", "--cable", "double"]
     )
 
     recruitment_amplitude_batch._resolve_workload_args(args)
@@ -38,7 +38,7 @@ def test_realistic_double_population_shares_exact_mrg_templates() -> None:
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "p14_realistic",
+            "realistic",
             "--cable",
             "double",
             "--axon-count",
@@ -56,7 +56,7 @@ def test_realistic_single_population_shares_canonical_diameter_templates() -> No
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "p14_realistic",
+            "realistic",
             "--cable",
             "single",
             "--axon-count",
@@ -76,7 +76,7 @@ def test_realistic_population_benchmark_can_retain_distinct_ab_control() -> None
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "p14_realistic",
+            "realistic",
             "--cable",
             "double",
             "--axon-count",
@@ -122,7 +122,7 @@ def test_translated_mrg_workload_shares_structural_materialization() -> None:
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "p14_realistic",
+            "realistic",
             "--cable",
             "double",
             "--axon-count",
@@ -148,7 +148,7 @@ def test_translated_mrg_workload_samples_row_specific_footprints() -> None:
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "p14_realistic",
+            "realistic",
             "--cable",
             "double",
             "--axon-count",
@@ -194,7 +194,7 @@ def test_p14_dry_run_records_workload_shape(tmp_path: Path) -> None:
         recruitment_amplitude_batch.main(
             [
                 "--workload",
-                "p14_realistic",
+                "realistic",
                 "--cable",
                 "single",
                 "--policies",
@@ -208,7 +208,7 @@ def test_p14_dry_run_records_workload_shape(tmp_path: Path) -> None:
     )
 
     manifest = json.loads((tmp_path / "manifest.json").read_text())
-    assert manifest["workload"] == "p14_realistic"
+    assert manifest["workload"] == "realistic"
     assert manifest["cable"] == "single"
     assert manifest["profile_scope"] == "run"
     assert manifest["n_axons"] == 196
@@ -321,7 +321,7 @@ def test_multi_drive_workload_keeps_one_static_and_one_variable_drive() -> None:
     args = recruitment_amplitude_batch.build_parser().parse_args(
         [
             "--workload",
-            "legacy",
+            "smoke",
             "--cable",
             "single",
             "--axon-count",

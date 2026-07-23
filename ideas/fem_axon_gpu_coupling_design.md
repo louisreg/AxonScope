@@ -1,5 +1,10 @@
 # Efficient Coupling of FEM Extracellular Fields with GPU-Ready 1D Axon Solvers
 
+Status: future integration proposal. External geometry/FEM packages own field
+solving, trajectories, point location, and projection. AxonFleet consumes only
+the resulting sampled extracellular footprints. The active task and product
+boundary are tracked in `todo.md` and `GUIDELINES.md`.
+
 ## 1. Context and Goal
 
 This document describes an efficient architecture for a simulation package that models the effect of electrical stimulation on nerve fibers.

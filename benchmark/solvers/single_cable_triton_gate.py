@@ -16,7 +16,7 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from axonscope.runtime.jax.kernels.triton_single_cable import (
+from axonfleet.runtime.jax.kernels.triton_single_cable import (
     single_cable_triton_dependency_skip_reason,
     solve_single_cable_tridiagonal_xb,
 )

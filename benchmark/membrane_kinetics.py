@@ -19,23 +19,23 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import axonscope as axs
-from axonscope.membranes.model import Model, currents, markov, state
-from axonscope.membranes.types import (
+import axonfleet as axs
+from axonfleet.membranes.model import Model, currents, markov, state
+from axonfleet.membranes.types import (
     ConductanceDensity,
     CurrentDensity,
     Occupancy,
     Rate,
     Voltage,
 )
-from axonscope.model_ir.source import compile_model_source_file
-from axonscope.runtime.jax.membranes.compile import compile_membrane_model
-from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
-from axonscope.runtime.jax.membranes.kinetics import (
+from axonfleet.model_ir.source import compile_model_source_file
+from axonfleet.runtime.jax.membranes.compile import compile_membrane_model
+from axonfleet.runtime.jax.membranes.program import JaxMembraneProgram
+from axonfleet.runtime.jax.membranes.kinetics import (
     solve_conserved_kinetic_step,
     solve_kinetic_step,
 )
-from axonscope.utils.units import cm2, mS, mV, ms
+from axonfleet.utils.units import cm2, mS, mV, ms
 
 
 class SixStateKinetics(Model):

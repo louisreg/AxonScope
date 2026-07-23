@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def _run_simulation(axons, **kwargs):
@@ -39,7 +39,7 @@ def test_public_unmyelinated_template_and_simulate():
     run = _run_simulation(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
     result = run.single
 
-    assert isinstance(run, axs.AxonSimulationResult)
+    assert isinstance(run, axs.results.AxonSimulationResult)
     assert result.Vm.shape == (2, 11)
     assert np.asarray(result.t).shape == (2,)
     assert isinstance(axon, axs.axons.Unmyelinated)
@@ -50,7 +50,7 @@ def test_public_unmyelinated_template_and_simulate():
     assert result.recordings is not None
     assert set(run.recordings[0]) == set(result.recordings)
     np.testing.assert_allclose(run.recordings[0]["Vm"], result.recordings["Vm"])
-    assert run.recorded_axes[0].original_indices == tuple(range(11))
+    assert result.recorded_axis.original_indices == tuple(range(11))
     assert run.final_states == (None,)
     assert result.final_state is None
 
@@ -112,19 +112,12 @@ def test_public_simulation_owns_one_extracellular_stimulation():
     sim.add_extracellular_stimulation(stimulation=stimulation)
 
     assert sim.extracellular_stimulation is stimulation
-    assert sim.extracellular_stimulations == (stimulation,)
+    assert not hasattr(sim, "extracellular_stimulations")
     assert not hasattr(sim, "extracellular_context")
     assert not hasattr(sim, "extracellular_contexts")
     assert sim.use_extracellular
     assert not hasattr(sim, "clear_extracellular_contexts")
     assert not hasattr(sim, "clear_extracellular_context")
-
-    sim.clear_extracellular_stimulation()
-
-    assert sim.extracellular_stimulation is None
-    assert sim.extracellular_stimulations == ()
-    assert not sim.use_extracellular
-
 
 def test_public_simulate_rejects_partial_final_time_step():
     axon = axs.axons.HodgkinHuxley(
@@ -154,10 +147,11 @@ def test_public_recording_full_returns_named_observable_groups():
     )
     row = result.single
 
-    assert result.recording_manifest.has(axs.signals.Vm)
-    assert result.recording_manifest.has(axs.signals.GATES)
-    assert result.recording_manifest.has(axs.signals.CURRENTS)
-    assert result.recording_manifest.has(axs.signals.CONDUCTANCES)
+    available = result.recording_manifest.available_signals
+    assert axs.signals.Vm in available
+    assert axs.signals.GATES in available
+    assert axs.signals.CURRENTS in available
+    assert axs.signals.CONDUCTANCES in available
     assert row.recordings is not None
     assert row.signal(axs.signals.Vm).shape == (2, 11)
     assert set(row.signal(axs.signals.GATES)) == {
@@ -267,7 +261,7 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
         observers=[activation],
     )
 
-    assert compact.recording_manifest.available == ()
+    assert compact.recording_manifest.available_signals == ()
     assert len(compact) == 2
     assert compact.recordings == (None, None)
     assert compact.observations is not None
@@ -426,7 +420,7 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    axs.enable_benchmark("/tmp/axonscope-zero-vstim-test", print_summary=False, save=False)
+    axs.enable_benchmark("/tmp/axonfleet-zero-vstim-test", print_summary=False, save=False)
     try:
         compact = _run_simulation(
             axons,
@@ -482,7 +476,7 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
         instance.add_extracellular_stimulation(stimulation=stimulation)
         axons.append(instance)
 
-    axs.enable_benchmark("/tmp/axonscope-zero-iinj-test", print_summary=False, save=False)
+    axs.enable_benchmark("/tmp/axonfleet-zero-iinj-test", print_summary=False, save=False)
     try:
         result = _run_simulation(
             axons,
@@ -530,8 +524,8 @@ def test_public_recording_observable_signals_use_batch_route():
     row = result.single
 
     assert row.diagnostics["dispatch_method"] == "batch-single-cable"
-    assert result.recording_manifest.has(axs.signals.Vm)
-    assert result.recording_manifest.has(axs.signals.GATES)
+    assert axs.signals.Vm in result.recording_manifest.available_signals
+    assert axs.signals.GATES in result.recording_manifest.available_signals
     assert row.recordings is not None
     assert set(row.recordings) == {"Vm", "gates"}
     assert row.signal(axs.signals.Vm).shape == (2, 11)
@@ -543,8 +537,8 @@ def test_public_recording_observable_signals_use_batch_route():
 
 
 def test_public_signal_descriptors_are_extensible():
-    custom = axs.Signal(
-        id=axs.SignalId("teaching_custom_signal"),
+    custom = axs.signals.Signal(
+        id=axs.identifiers.SignalId("teaching_custom_signal"),
         result_key="teaching_custom_signal",
         unit="arbitrary",
         description="User-defined teaching signal.",
@@ -555,7 +549,7 @@ def test_public_signal_descriptors_are_extensible():
 
     assert recording.signals == (custom,)
     assert recording.voltage is False
-    assert custom.id == axs.SignalId("teaching_custom_signal")
+    assert custom.id == axs.identifiers.SignalId("teaching_custom_signal")
 
 
 def test_public_single_recording_can_record_observables_without_voltage():
@@ -575,8 +569,8 @@ def test_public_single_recording_can_record_observables_without_voltage():
     row = result.single
 
     assert row.diagnostics["dispatch_method"] == "batch-single-cable"
-    assert result.recording_manifest.has(axs.signals.GATES)
-    assert not result.recording_manifest.has(axs.signals.Vm)
+    assert axs.signals.GATES in result.recording_manifest.available_signals
+    assert axs.signals.Vm not in result.recording_manifest.available_signals
     assert row.recordings is not None
     assert set(row.recordings) == {"gates"}
     assert set(row.signal(axs.signals.GATES)) == {
@@ -700,50 +694,40 @@ def test_public_axon_simulation_pool_returns_canonical_result():
         recording=recording,
     )
 
-    assert isinstance(result, axs.AxonSimulationResult)
+    assert isinstance(result, axs.results.AxonSimulationResult)
     assert not isinstance(result, list)
     assert not hasattr(result, "cohorts")
     assert len(result) == 2
-    assert result.axons == (axon_model, axon_model)
-    assert result.simulations == (axon_a, axon_b)
-    assert result.diagnostics[0]["pool_index"] == 0
+    assert tuple(row.axon for row in result) == (axon_model, axon_model)
+    assert tuple(row.simulation for row in result) == (axon_a, axon_b)
+    assert result[0].diagnostics["pool_index"] == 0
     assert len(result.recordings) == 2
     assert result.recordings[0] is not None
     assert result.recordings[0]["Vm"].shape == (2, 1)
     assert result.final_states == (None, None)
 
     manifest = result.recording_manifest
-    assert isinstance(manifest, axs.RecordingManifest)
+    assert isinstance(manifest, axs.results.RecordingManifest)
     assert manifest.policy is recording
     assert manifest.requested_signals == (axs.signals.Vm,)
     assert manifest.available_signals == (axs.signals.MEMBRANE_VOLTAGE,)
-    vm_manifest = manifest.signal(axs.signals.Vm)
-    assert isinstance(vm_manifest, axs.RecordedSignal)
-    assert vm_manifest.result_key == "Vm"
-    assert vm_manifest.unit == "millivolt"
-    assert vm_manifest.cohort_indices == (0,)
-    assert vm_manifest.cohort_shapes == ((2, 2, 1),)
-    assert vm_manifest.cohort_count == 1
     assert result[0].recording_manifest is manifest
-    with pytest.raises(TypeError, match="signals values"):
-        manifest.signal("Vm")
 
-    first = result.axon(0)
-    assert isinstance(first, axs.AxonResultView)
+    first = result[0]
+    assert isinstance(first, axs.results.AxonResultView)
     assert first.index == 0
     assert first.simulation is axon_a
     assert first.record_indices == (5,)
     assert first.trace_values(index=0)[0].shape == (2,)
-    assert isinstance(first.recorded_axis, axs.RecordedAxis)
+    assert isinstance(first.recorded_axis, axs.results.RecordedAxis)
     assert first.recorded_axis.original_indices == (5,)
     np.testing.assert_allclose(first.recorded_axis.position_values(unit=axs.um), [50.0])
-    assert result.recorded_axes[0].original_indices == (5,)
     np.testing.assert_allclose(first.signal(axs.signals.Vm), first.Vm)
 
     dense_vm = result.signal(axs.signals.Vm)
     assert dense_vm.shape == (2, 2, 1)
     np.testing.assert_allclose(np.asarray(first.Vm), dense_vm[0])
-    assert result.views[1].simulation is axon_b
+    assert result[1].simulation is axon_b
     assert not hasattr(result[1], "to_sim_result")
 
     with pytest.raises(TypeError, match="signals values"):
@@ -781,7 +765,7 @@ def test_public_axon_simulation_pool_single_view_and_heterogeneous_rows():
         dt=0.05 * axs.ms,
     )
     assert [view.Vm.shape for view in mixed] == [(2, 11), (2, 13)]
-    assert [axis.original_indices for axis in mixed.recorded_axes] == [
+    assert [row.recorded_axis.original_indices for row in mixed] == [
         tuple(range(11)),
         tuple(range(13)),
     ]
@@ -845,7 +829,7 @@ def test_public_axon_population_rejects_empty_and_invalid_entries():
 
 
 def test_public_axon_simulation_pool_accepts_axon_population():
-    population = axs.AxonPopulation.single(
+    population = axs.AxonPopulation(
         axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
             diameter=0.5 * axs.um,
@@ -885,7 +869,7 @@ def test_public_root_axon_simulation_runs_single_instance():
     run = simulation.run()
     result = run.single
 
-    assert isinstance(run, axs.AxonSimulationResult)
+    assert isinstance(run, axs.results.AxonSimulationResult)
     assert simulation.is_single
     assert simulation.is_population
     assert result.simulation is instance
@@ -898,7 +882,7 @@ def test_public_root_axon_simulation_runs_single_instance():
 
 
 def test_public_root_axon_simulation_keeps_one_row_population_lifecycle():
-    population = axs.AxonPopulation.single(
+    population = axs.AxonPopulation(
         axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
             diameter=0.5 * axs.um,
@@ -1018,8 +1002,8 @@ def test_public_multi_row_pool_recording_keeps_named_observable_groups():
         recording=axs.Recording.full(),
     )
 
-    assert full.recording_manifest.has(axs.signals.Vm)
-    assert full.recording_manifest.has(axs.signals.GATES)
+    assert axs.signals.Vm in full.recording_manifest.available_signals
+    assert axs.signals.GATES in full.recording_manifest.available_signals
     assert full.signal(axs.signals.Vm).shape == (2, 2, 11)
     assert full.signal(axs.signals.GATES)["hodgkin_huxley.m"].shape == (2, 2, 11)
 
@@ -1030,8 +1014,8 @@ def test_public_multi_row_pool_recording_keeps_named_observable_groups():
         recording=axs.Recording.only(axs.signals.GATES),
     )
 
-    assert gates_only.recording_manifest.has(axs.signals.GATES)
-    assert not gates_only.recording_manifest.has(axs.signals.Vm)
+    assert axs.signals.GATES in gates_only.recording_manifest.available_signals
+    assert axs.signals.Vm not in gates_only.recording_manifest.available_signals
     assert gates_only.signal(axs.signals.GATES)["hodgkin_huxley.m"].shape == (2, 2, 11)
     assert all(row.recordings is not None and set(row.recordings) == {"gates"} for row in gates_only)
 
@@ -1107,18 +1091,16 @@ def test_public_myelinated_constructor_accepts_mrg_like_layout():
         flut=axs.membranes.Passive(Rm=1e6, EL=-80.0),
         stin=axs.membranes.Passive(Rm=1e6, EL=-80.0),
     )
-    layout = axs.axons.mrg_like_layout(
+    layout = axs.axons.MRGLikeDoubleCableTemplate(
         diameter=5.7 * axs.um,
         nodes=3,
-        membranes=section_membranes,
-    )
+    ).layout(membranes=section_membranes)
 
     axon = axs.axons.Myelinated(
         layout=layout,
     )
 
     assert axon.nodes == 3
-    flat = axs.axons.flatten_layout(axon.layout)
-    assert set(kind.lower() for kind in flat.section_names) == {"node", "mysa", "flut", "stin"}
-    assert len(flat.membrane_models) == axon.n_compartments
-    assert np.asarray(axon.x_nodes_um).shape == np.asarray(axon.node_indices).shape
+    section_names = {element.section.name.lower() for element in axon.layout.elements}
+    assert section_names == {"node", "mysa", "flut", "stin"}
+    assert axon.node_position_values(unit=axs.um).shape == np.asarray(axon.node_indices).shape

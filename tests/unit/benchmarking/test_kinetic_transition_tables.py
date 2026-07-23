@@ -4,8 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+import axonfleet as axs
+from axonfleet.runtime.jax.membranes.compile import compile_membrane_model
 from benchmark.kinetic_transition_tables import (
     TableSpec,
     apply_transition_table,

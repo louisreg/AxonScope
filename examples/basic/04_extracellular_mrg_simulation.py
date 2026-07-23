@@ -7,8 +7,8 @@ Run:
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
-from axonscope.axons import MRG
+import axonfleet as axs
+from axonfleet.axons import MRG
 
 
 def main() -> None:

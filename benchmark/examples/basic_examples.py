@@ -18,8 +18,8 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import axonscope as axs
-from axonscope.benchmarking import benchmark_span
+import axonfleet as axs
+from axonfleet.benchmarking import benchmark_span
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -139,7 +139,7 @@ def _parse_examples(value: str) -> list[ExampleSpec]:
 
 
 def _load_example(spec: ExampleSpec):
-    module_name = f"_axonscope_basic_example_{spec.key}_{spec.label}"
+    module_name = f"_axonfleet_basic_example_{spec.key}_{spec.label}"
     spec_obj = importlib.util.spec_from_file_location(module_name, spec.path)
     if spec_obj is None or spec_obj.loader is None:
         raise RuntimeError(f"Could not load {spec.path}.")

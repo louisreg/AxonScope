@@ -66,7 +66,7 @@ def test_membrane_temporal_replay_uses_fresh_processes_and_dynamic_values(
             "HloModule fake\n",
             encoding="utf-8",
         )
-        cache = Path(env["AXONSCOPE_JAX_COMPILATION_CACHE"])
+        cache = Path(env["AXONFLEET_CACHE"]) / "runtime" / "jax" / "xla"
         cache.mkdir(parents=True, exist_ok=True)
         if len(calls) == 1:
             (cache / "jit-cache").write_text("cached", encoding="utf-8")
@@ -93,7 +93,7 @@ def test_membrane_temporal_replay_uses_fresh_processes_and_dynamic_values(
     assert all("--cold-only" in command for command, _ in calls)
     assert calls[2][0][calls[2][0].index("--v-init-mv") + 1] == "-69.5"
     cache_roots = {
-        environment["AXONSCOPE_JAX_COMPILATION_CACHE"]
+        environment["AXONFLEET_CACHE"]
         for _, environment in calls
     }
     assert len(cache_roots) == 1

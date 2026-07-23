@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
 import jax.numpy as jnp
 import neuron
 import nrv
 import numpy as np
 import pytest
 
-from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+from axonfleet.runtime.jax.membranes.compile import compile_membrane_model
 
 
 @pytest.mark.parametrize(

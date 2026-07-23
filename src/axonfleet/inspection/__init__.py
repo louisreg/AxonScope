@@ -1,0 +1,616 @@
+"""Host-side inspection builder for the solver pipeline."""
+
+from __future__ import annotations
+
+from typing import Any, Iterable, Sequence
+
+import numpy as np
+
+from axonfleet.axon_instance import AxonInstance
+from axonfleet.axons.axon import Axon
+from axonfleet.runtime.execution import (
+    CableSolverRoute,
+    batch_options_from_recording,
+    benchmark_lower_recording_options,
+    benchmark_observer_output_label,
+    benchmark_observers_are_vm_raster_compatible,
+    benchmark_plan_input_lowering,
+    benchmark_vm_raster_definitions,
+    solver_route_from_execution_policy,
+)
+from axonfleet.dispatcher.plan import DispatchGroup, build_dispatch_plan
+from axonfleet.inspection.records import (
+    AssemblyDetailInspection,
+    DispatchGroupInspection,
+    KernelInspection,
+    LoweringInspection,
+    MemoryInspection,
+    MembraneSourceInspection,
+    PaddingInspection,
+    PlanningInspection,
+    PreparationInspection,
+    ProbeInspection,
+    ResultAssemblyInspection,
+    SimulationInspection,
+)
+from axonfleet.membranes.compiler import lower_membrane_model_with_sources
+from axonfleet.runtime import ExecutionPolicy
+from axonfleet.population import AxonPopulation
+from axonfleet.preparation.cohort import PreparedCohort
+from axonfleet.recording import Recording
+from axonfleet.solvers.options import (
+    BatchOptions,
+)
+from axonfleet.runtime.timebase import simulation_step_count
+from axonfleet.utils import units
+
+
+def inspect_simulation(
+    axons: Axon | AxonInstance | AxonPopulation | Iterable[Axon | AxonInstance],
+    *,
+    duration: Any,
+    dt: Any,
+    recording: Recording | None = None,
+    batch_options: BatchOptions | None = None,
+    observers: Sequence[Any] | None = None,
+    execution_policy: ExecutionPolicy | None = None,
+    print_summary: bool = False,
+) -> SimulationInspection:
+    """Inspect planning, preparation, lowering, kernels, and result assembly."""
+
+    population = axons if isinstance(axons, AxonPopulation) else AxonPopulation(axons)
+    instances = tuple(population.instances)
+    duration_ms = units.to_ms(duration)
+    dt_ms = units.to_ms(dt)
+    step_count = simulation_step_count(duration_ms, dt_ms)
+    plan = build_dispatch_plan(instances)
+    resolved_batch_options = _inspection_batch_options(
+        recording=recording,
+        batch_options=batch_options,
+    )
+    observer_defs = tuple(observers) if observers is not None else None
+    groups = tuple(plan.groups)
+    dispatch_groups = tuple(
+        _inspect_dispatch_group(group)
+        for group in groups
+    )
+    padding = tuple(_inspect_padding(group) for group in groups)
+    preparations = tuple(_inspect_prepared_group(group) for group in groups)
+    lowerings = tuple(
+        _inspect_lowering(
+            group,
+            step_count=step_count,
+            batch_options=resolved_batch_options,
+            observers=observer_defs,
+        )
+        for group in groups
+    )
+    probes = tuple(
+        _inspect_probes(
+            group,
+            step_count=step_count,
+            observers=observer_defs,
+            batch_options=resolved_batch_options,
+        )
+        for group in groups
+    )
+    inspection = SimulationInspection(
+        planning=PlanningInspection(
+            axon_count=len(instances),
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+            step_count=step_count,
+            execution_policy=execution_policy,
+        ),
+        dispatch_groups=dispatch_groups,
+        padding=padding,
+        preparations=preparations,
+        membrane_sources=tuple(_inspect_membrane_sources(group) for group in groups),
+        lowerings=lowerings,
+        probes=probes,
+        memory=tuple(
+            _inspect_memory(
+                group,
+                step_count=step_count,
+                lowering=lowering,
+                probes=probe,
+                execution_policy=execution_policy,
+            )
+            for group, lowering, probe in zip(groups, lowerings, probes, strict=True)
+        ),
+        kernels=tuple(
+            _inspect_kernel(
+                group,
+                batch_options=resolved_batch_options,
+                execution_policy=execution_policy,
+            )
+            for group in groups
+        ),
+        result_assembly=tuple(
+            _inspect_result_assembly(
+                group,
+                step_count=step_count,
+                batch_options=resolved_batch_options,
+                observers=observer_defs,
+            )
+            for group in groups
+        ),
+        assembly_details=tuple(
+            _inspect_assembly_details(
+                group,
+                step_count=step_count,
+                batch_options=resolved_batch_options,
+                observers=observer_defs,
+                probes=probe,
+            )
+            for group, probe in zip(groups, probes, strict=True)
+        ),
+    )
+    if print_summary:
+        inspection.print()
+    return inspection
+
+
+def _inspect_dispatch_group(
+    group: DispatchGroup,
+) -> DispatchGroupInspection:
+    return DispatchGroupInspection(
+        group_id=int(group.group_id),
+        pool_indices=group.pool_indices,
+        mode=str(group.mode),
+        size=int(group.size),
+        nx=int(group.nx),
+        batch_kind=group.batch_kind,
+        geometry_shared=bool(group.geometry_shared),
+        has_padding=bool(group.has_padding),
+    )
+
+
+def _inspect_padding(group: DispatchGroup) -> PaddingInspection:
+    row_nx = tuple(int(item.solver_axon.n_compartments) for item in group.items)
+    padded_nx = int(group.nx)
+    padded_compartments = sum(max(0, padded_nx - nx) for nx in row_nx)
+    denominator = max(1, int(group.size) * padded_nx)
+    return PaddingInspection(
+        group_id=int(group.group_id),
+        row_nx=row_nx,
+        padded_nx=padded_nx,
+        padded_compartments=int(padded_compartments),
+        padded_fraction=float(padded_compartments) / float(denominator),
+    )
+
+
+def _inspect_prepared_group(group: DispatchGroup) -> PreparationInspection:
+    cohort = PreparedCohort.from_dispatch_group(group)
+    representative_index = None
+    for item in group.items:
+        if item.simulation is cohort.representative:
+            representative_index = int(item.index)
+            break
+    return PreparationInspection(
+        group_id=int(cohort.group_id),
+        mode=cohort.mode,
+        size=int(cohort.size),
+        nx=int(cohort.nx),
+        extracellular_stimulation_count=int(cohort.extracellular_stimulation_count),
+        x_positions_shape=tuple(int(value) for value in cohort.x_positions_m.shape),
+        representative_index=representative_index,
+    )
+
+
+def _inspect_membrane_sources(group: DispatchGroup) -> MembraneSourceInspection:
+    unique_models: dict[tuple[Any, ...], Any] = {}
+    for item in group.items:
+        for model in item.solver_axon.membrane_models:
+            signature = model._static_signature()
+            unique_models.setdefault(signature, model)
+
+    source_results: list[Any] = []
+    kinds: list[str] = []
+    for model in unique_models.values():
+        lowered = lower_membrane_model_with_sources(model)
+        kinds.append(str(model.kind))
+        source_results.extend(lowered.source_results)
+
+    return MembraneSourceInspection(
+        group_id=int(group.group_id),
+        unique_membrane_count=len(unique_models),
+        kinds=tuple(sorted(set(kinds))),
+        source_count=len(source_results),
+        cache_statuses=tuple(
+            "hit" if result.cache.cache_hit else "miss"
+            for result in source_results
+        ),
+        cache_reasons=tuple(result.cache.cache_reason for result in source_results),
+        cache_keys=tuple(result.cache.key for result in source_results),
+        source_hashes=tuple(result.source_hash for result in source_results),
+        source_paths=tuple(str(result.source_path) for result in source_results),
+    )
+
+
+def _inspection_batch_options(
+    *,
+    recording: Recording | None,
+    batch_options: BatchOptions | None,
+) -> BatchOptions:
+    options = BatchOptions.full() if batch_options is None else batch_options
+    lowered = batch_options_from_recording(recording, batch_options=options)
+    return options if lowered is None else lowered
+
+
+def _inspect_lowering(
+    group: DispatchGroup,
+    *,
+    step_count: int,
+    batch_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+) -> LoweringInspection:
+    vm_raster_supported = benchmark_observers_are_vm_raster_compatible(observers)
+    observer_output = benchmark_observer_output_label(
+        observers,
+        recording_mode=batch_options.recording.mode,
+    )
+    cohort = PreparedCohort.from_dispatch_group(group)
+    kernel_options = benchmark_lower_recording_options(
+        group,
+        batch_options,
+        observers=observers,
+    )
+    observer_plan = bool(
+        observers is not None
+        and kernel_options.recording.mode == "none"
+        and vm_raster_supported
+    )
+    planned = benchmark_plan_input_lowering(
+        group_mode=group.mode,
+        axons=cohort.axons,
+        stimulation_rows=cohort.stimulations,
+        kernel_options=kernel_options,
+        observers=observers,
+    )
+    intracellular_format = planned.intracellular_format
+    extracellular_format = planned.extracellular_format
+
+    dense_shape = (int(group.size), int(step_count), int(group.nx))
+    dense_iinj_shape = None if intracellular_format != "dense" else dense_shape
+    dense_vstim_shape = None if extracellular_format != "dense" else dense_shape
+    if observer_plan:
+        observer_format = observer_output
+    elif observers and kernel_options.recording.mode == "none":
+        observer_format = "unsupported_observer_only"
+    elif observers:
+        observer_format = "posthoc_from_recorded_vm"
+    else:
+        observer_format = "none"
+
+    return LoweringInspection(
+        group_id=int(group.group_id),
+        intracellular_format=intracellular_format,
+        extracellular_format=extracellular_format,
+        observer_format=observer_format,
+        recording_mode=batch_options.recording.mode,
+        kernel_recording_mode=kernel_options.recording.mode,
+        retained_vm_width=int(kernel_options.recording.width_for(group.nx)),
+        dense_iinj_shape=dense_iinj_shape,
+        dense_vstim_shape=dense_vstim_shape,
+        materializes_dense_vstim=dense_vstim_shape is not None,
+    )
+
+
+def _inspect_probes(
+    group: DispatchGroup,
+    *,
+    step_count: int,
+    observers: tuple[Any, ...] | None,
+    batch_options: BatchOptions,
+) -> ProbeInspection:
+    definitions = benchmark_vm_raster_definitions(observers)
+    if not definitions:
+        return ProbeInspection(
+            group_id=int(group.group_id),
+            observer_names=(),
+            thresholds_mV=(),
+            probe_indices_by_row=(),
+            row_probe_counts=(),
+            max_probe_count=0,
+            retained_shape=None,
+            retained_bytes=0,
+        )
+
+    names = tuple(str(definition.name) for definition in definitions)
+    thresholds = tuple(units.to_mV(definition.threshold) for definition in definitions)
+    by_row: list[tuple[tuple[int, ...], ...]] = []
+    counts: list[tuple[int, ...]] = []
+    max_probe_count = 0
+    for item in group.items:
+        positions_um = np.asarray(item.solver_axon.x_um, dtype=float)
+        original_indices = np.arange(positions_um.shape[0], dtype=np.int32)
+        row_indices: list[tuple[int, ...]] = []
+        row_counts: list[int] = []
+        for definition in definitions:
+            selected = definition.target.columns(
+                positions_um=positions_um,
+                original_indices=original_indices,
+            )
+            original_selected = tuple(int(original_indices[index]) for index in selected)
+            row_indices.append(original_selected)
+            row_counts.append(len(original_selected))
+            max_probe_count = max(max_probe_count, len(original_selected))
+        by_row.append(tuple(row_indices))
+        counts.append(tuple(row_counts))
+
+    observer_output = benchmark_observer_output_label(
+        observers,
+        recording_mode=batch_options.recording.mode,
+    )
+    if observer_output == "activation":
+        retained_shape = (int(group.size), len(definitions))
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(bool).itemsize
+    elif observer_output == "first_crossing":
+        retained_shape = (int(group.size), len(definitions))
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
+    elif observer_output in {"spike_summary", "spike_events"}:
+        capacity = getattr(definitions[0], "max_spikes", None)
+        state_width = 4 if capacity is None else 5 + int(capacity)
+        retained_shape = (
+            int(group.size),
+            len(definitions),
+            int(max_probe_count),
+            state_width,
+        )
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
+    else:
+        temporal_stride = int(getattr(definitions[0], "every_n_steps", 1))
+        sampled_steps = (int(step_count) + temporal_stride - 1) // temporal_stride
+        word_count = (sampled_steps + 31) // 32
+        retained_shape = (
+            int(group.size),
+            len(definitions),
+            int(max_probe_count),
+            word_count,
+        )
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.uint32).itemsize
+    return ProbeInspection(
+        group_id=int(group.group_id),
+        observer_names=names,
+        thresholds_mV=thresholds,
+        probe_indices_by_row=tuple(by_row),
+        row_probe_counts=tuple(counts),
+        max_probe_count=int(max_probe_count),
+        retained_shape=retained_shape,
+        retained_bytes=retained_bytes,
+    )
+
+
+def _inspect_memory(
+    group: DispatchGroup,
+    *,
+    step_count: int,
+    lowering: LoweringInspection,
+    probes: ProbeInspection,
+    execution_policy: ExecutionPolicy | None,
+) -> MemoryInspection:
+    dtype = _inspection_dtype(group, execution_policy)
+    itemsize = int(dtype.itemsize)
+    state_bytes = int(group.size) * int(group.nx) * itemsize
+    prepared_position_bytes = int(group.size) * int(group.nx) * itemsize
+    dense_iinj_bytes = _shape_nbytes(lowering.dense_iinj_shape, dtype)
+    dense_vstim_bytes = _shape_nbytes(lowering.dense_vstim_shape, dtype)
+    retained_vm_bytes = (
+        int(group.size) * int(step_count) * int(lowering.retained_vm_width) * itemsize
+    )
+    observer_bytes = (
+        int(probes.retained_bytes)
+        if lowering.observer_format
+        in {"activation", "first_crossing", "spike_summary", "spike_events", "vm_raster"}
+        else 0
+    )
+    total_estimated = (
+        state_bytes
+        + prepared_position_bytes
+        + dense_iinj_bytes
+        + dense_vstim_bytes
+        + retained_vm_bytes
+        + observer_bytes
+    )
+    retained_public = retained_vm_bytes + observer_bytes
+    return MemoryInspection(
+        group_id=int(group.group_id),
+        dtype=str(dtype),
+        state_bytes=state_bytes,
+        prepared_position_bytes=prepared_position_bytes,
+        dense_iinj_bytes=dense_iinj_bytes,
+        dense_vstim_bytes=dense_vstim_bytes,
+        retained_vm_bytes=retained_vm_bytes,
+        observer_bytes=observer_bytes,
+        total_estimated_bytes=int(total_estimated),
+        retained_public_bytes=int(retained_public),
+    )
+
+
+def _inspect_kernel(
+    group: DispatchGroup,
+    *,
+    batch_options: BatchOptions,
+    execution_policy: ExecutionPolicy | None,
+) -> KernelInspection:
+    if group.mode == "double":
+        kernel = "DoubleCableBatchKernel"
+    else:
+        kernel = "SingleCableVStimBatchKernel"
+    return KernelInspection(
+        group_id=int(group.group_id),
+        kernel=kernel,
+        cable_mode=str(group.mode),
+        solver=_inspect_cable_solver_route(
+            cable_mode=str(group.mode),
+            execution_policy=execution_policy,
+        ),
+        time_chunk_steps=batch_options.time_chunk_steps,
+    )
+
+
+def _inspect_result_assembly(
+    group: DispatchGroup,
+    *,
+    step_count: int,
+    batch_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+) -> ResultAssemblyInspection:
+    kernel_options = benchmark_lower_recording_options(
+        group,
+        batch_options,
+        observers=observers,
+    )
+    width = int(kernel_options.recording.width_for(group.nx))
+    observer_only = (
+        observers is not None
+        and kernel_options.recording.mode == "none"
+        and benchmark_observers_are_vm_raster_compatible(observers)
+    )
+    if observer_only:
+        output = benchmark_observer_output_label(observers, recording_mode="none")
+        return ResultAssemblyInspection(
+            group_id=int(group.group_id),
+            record_kind="compact dispatch cohort",
+            vm_output="none",
+            observation_output=(
+                'observations["activation"]'
+                if output == "activation"
+                else (
+                    'observations["latency"]'
+                    if output == "first_crossing"
+                    else (
+                        'observations["spike_count"]'
+                        if output in {"spike_summary", "spike_events"}
+                        else 'observations["vm_raster"]'
+                    )
+                )
+            ),
+            public_result="compact AxonSimulationResult cohort",
+        )
+
+    if observers and kernel_options.recording.mode == "none":
+        observation_output = "unsupported_observer_only"
+    elif observers:
+        observation_output = "posthoc_from_recorded_vm"
+    else:
+        observation_output = "none"
+    return ResultAssemblyInspection(
+        group_id=int(group.group_id),
+        record_kind="dispatch row records",
+        vm_output=f"Vm[B={group.size}, Nt={step_count}, width={width}]",
+        observation_output=observation_output,
+        public_result="AxonSimulationResult rows",
+    )
+
+
+def _inspect_assembly_details(
+    group: DispatchGroup,
+    *,
+    step_count: int,
+    batch_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+    probes: ProbeInspection | None = None,
+) -> AssemblyDetailInspection:
+    kernel_options = benchmark_lower_recording_options(
+        group,
+        batch_options,
+        observers=observers,
+    )
+    width = int(kernel_options.recording.width_for(group.nx))
+    vm_shape: tuple[int, ...] | None = None
+    if kernel_options.recording.mode != "none":
+        vm_shape = (int(group.size), int(step_count), width)
+    probes = (
+        _inspect_probes(
+            group,
+            step_count=step_count,
+            observers=observers,
+            batch_options=batch_options,
+        )
+        if probes is None
+        else probes
+    )
+    observation_shape = (
+        probes.retained_shape
+        if (
+            probes.retained_shape is not None
+            and kernel_options.recording.mode == "none"
+            and benchmark_observers_are_vm_raster_compatible(observers)
+        )
+        else None
+    )
+    observations_are_batched = (
+        observation_shape is not None and kernel_options.recording.mode == "none"
+    )
+    return AssemblyDetailInspection(
+        group_id=int(group.group_id),
+        row_count=int(group.size),
+        vm_shape=vm_shape,
+        observation_shape=observation_shape,
+        observations_are_batched=bool(observations_are_batched),
+        public_rows=(
+            1 if observations_are_batched else int(group.size)
+        ),
+    )
+
+
+def _inspect_cable_solver_route(
+    *,
+    cable_mode: str,
+    execution_policy: ExecutionPolicy | None,
+) -> CableSolverRoute:
+    cable = f"{str(cable_mode).replace('-', '_')}_cable"
+    route = solver_route_from_execution_policy(execution_policy)
+    if route is not None:
+        cable_route = route.for_cable(cable_mode)
+        if cable_route is not None:
+            return cable_route
+    platform = _execution_policy_platform(execution_policy)
+    auto_label = "auto(default-runtime)" if platform is None else f"auto({platform})"
+    return CableSolverRoute(
+        cable=cable,
+        requested=auto_label,
+        runtime_route=auto_label,
+    )
+
+
+def _execution_policy_platform(policy: ExecutionPolicy | None) -> str | None:
+    if policy is None:
+        return None
+    if policy.device.kind in {"cpu", "gpu"}:
+        return policy.device.kind
+    return None
+
+
+def _inspection_dtype(
+    group: DispatchGroup,
+    execution_policy: ExecutionPolicy | None,
+) -> np.dtype:
+    if execution_policy is not None and execution_policy.precision is not None:
+        return np.dtype(execution_policy.precision.solver_dtype)
+    return np.dtype(group.items[0].solver_axon.dtype)
+
+
+def _shape_nbytes(shape: tuple[int, ...] | None, dtype: np.dtype) -> int:
+    if shape is None:
+        return 0
+    return int(np.prod(shape)) * int(dtype.itemsize)
+
+
+__all__ = [
+    "AssemblyDetailInspection",
+    "DispatchGroupInspection",
+    "KernelInspection",
+    "LoweringInspection",
+    "MemoryInspection",
+    "MembraneSourceInspection",
+    "PaddingInspection",
+    "PlanningInspection",
+    "ProbeInspection",
+    "PreparationInspection",
+    "ResultAssemblyInspection",
+    "SimulationInspection",
+    "inspect_simulation",
+]

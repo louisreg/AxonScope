@@ -4,7 +4,7 @@ Run:
     python examples/basic/07_threshold_vs_diameter.py
 
 Each threshold curve uses a point-source electrode and a batched binary search.
-At every bisection step, AxonScope simulates the whole diameter pool together
+At every bisection step, AxonFleet simulates the whole diameter pool together
 with one tested electrode-current amplitude per fiber.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -49,7 +49,7 @@ def main() -> None:
     # The activation criterion says what counts as "activated" during the
     # threshold search. `DISTAL` is resolved over the positions that are actually
     # recorded; below, the MRG run records node indices so this means distal node.
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=stim_start,
         target=axs.positions.DISTAL,

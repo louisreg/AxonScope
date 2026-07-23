@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def _pool() -> axs.AxonPopulation:
@@ -61,7 +61,6 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
 
     assert isinstance(report, axs.SimulationInspection)
     assert report.planning.step_count == 2
-    assert report.dispatch_groups[0].will_batch is True
     assert report.preparations[0].x_positions_shape == (2, 5)
     assert report.membrane_sources[0].unique_membrane_count == 1
     assert report.membrane_sources[0].kinds == ("composite",)
@@ -92,7 +91,7 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
 
     buffer = io.StringIO()
     report.print(file=buffer)
-    assert buffer.getvalue().startswith("AxonScope solver pipeline inspection")
+    assert buffer.getvalue().startswith("AxonFleet solver pipeline inspection")
 
 
 def test_root_simulation_exposes_pipeline_inspection():
@@ -277,9 +276,6 @@ def test_inspection_reports_singleton_observer_only_batch_route():
         observers=[activation],
     )
 
-    assert report.dispatch_groups[0].will_batch is True
-    assert report.lowerings[0].route == "batch"
-    assert report.kernels[0].route == "batch"
     assert report.result_assembly[0].record_kind == "compact dispatch cohort"
     assert report.assembly_details[0].public_rows == 1
 

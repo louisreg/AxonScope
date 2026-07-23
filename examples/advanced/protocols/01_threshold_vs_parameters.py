@@ -15,7 +15,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
@@ -48,7 +48,7 @@ def main() -> None:
 
     # Step 3: activation is evaluated at the distal recorded probe after the
     # stimulus starts.
-    criterion = axs.analysis.ActivationCriterion(
+    criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=pulse_start,
         target=axs.positions.DISTAL,

@@ -3,7 +3,7 @@
 Run:
     python examples/basic/06_activation_velocity.py
 
-Axons are built explicitly, then AxonScope automatically batches compatible
+Axons are built explicitly, then AxonFleet automatically batches compatible
 simulations when ``axs.AxonSimulation(...).run()`` is called.
 """
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:

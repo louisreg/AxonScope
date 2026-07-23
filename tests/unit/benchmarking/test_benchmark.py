@@ -5,24 +5,24 @@ from pathlib import Path
 
 import numpy as np
 
-import axonscope as axs
-from axonscope.benchmarking import (
+import axonfleet as axs
+from axonfleet.benchmarking import (
     BenchmarkOptions,
     benchmark,
-    benchmark_array_metadata,
     benchmark_report,
     benchmark_span,
     disable_benchmark,
     enable_benchmark,
     record_benchmark_metadata,
 )
+from axonfleet.runtime.benchmarking import benchmark_array_metadata
 
 
-def test_benchmark_options_are_public_and_do_not_expose_legacy_solver_suite():
-    import axonscope.benchmarking as benchmarking
+def test_benchmark_options_live_in_benchmarking_namespace_without_legacy_suite():
+    import axonfleet.benchmarking as benchmarking
 
-    assert axs.BenchmarkOptions is BenchmarkOptions
-    assert "BenchmarkOptions" in axs.__all__
+    assert benchmarking.BenchmarkOptions is BenchmarkOptions
+    assert not hasattr(axs, "BenchmarkOptions")
     assert "SolverBenchmarkCase" not in benchmarking.__all__
     assert "run_solver_benchmark_case" not in benchmarking.__all__
 

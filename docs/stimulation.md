@@ -1,6 +1,6 @@
 # Stimulation
 
-`axonscope.stimulation` contains backend-independent stimulation descriptions:
+`axonfleet.stimulation` contains backend-independent stimulation descriptions:
 temporal waveforms, sampled extracellular footprints/drives, and physical
 intracellular contexts.
 
@@ -13,10 +13,9 @@ Stimulus -> Clamp or Footprint/Drive -> AxonInstance/AxonPopulation -> AxonSimul
 ## Public Surface
 
 ```python
-import axonscope as axs
-from axonscope.stimulation import (
+import axonfleet as axs
+from axonfleet.stimulation import (
     Stimulus,
-    IntracellularContext,
     IntracellularCurrentClamp,
     ExtracellularFootprint,
     ExtracellularDrive,
@@ -30,10 +29,10 @@ drive_id = axs.DriveId("center contact")
 Package layout:
 
 ```text
-src/axonscope/stimulation/
+src/axonfleet/stimulation/
   stimuli.py       temporal waveforms
   extracellular.py static footprints, drives, and dense inspection objects
-  contexts.py      intracellular contexts
+  contexts.py      intracellular current clamp
   __init__.py      public facade
 ```
 
@@ -55,7 +54,7 @@ milliseconds. The only implicit time default is an omitted `start`, which means
 0 ms:
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 stimulus = Stimulus.biphasic(
     start=200.0 * axs.us,
@@ -134,10 +133,9 @@ the same context object:
 sim.add_current_clamp(position=500.0 * axs.um, current=current)
 ```
 
-`IntracellularContext` is the base contract. The current concrete subclass is
-`IntracellularCurrentClamp`, and the runtime compiler currently supports this
-point-injection context. The stored `clamp.current` is a `Stimulus` normalized
-to nanoamperes.
+`IntracellularCurrentClamp` is the point-injection contract supported by the
+runtime compiler. The stored `clamp.current` is a `Stimulus` normalized to
+nanoamperes.
 
 ## Extracellular Stimulation
 
@@ -236,12 +234,12 @@ sim.add_extracellular_stimulation(stimulation=updated, replace=True)
 ```
 
 NRV/FEM/LIFE workflows should use the adapter helpers in
-`axonscope.integrations.nrv` through two bridges. NRV builds the external
-geometry, fiber population, electrodes, and FEM field; AxonScope receives an
+`axonfleet.integrations.nrv` through two bridges. NRV builds the external
+geometry, fiber population, electrodes, and FEM field; AxonFleet receives an
 intrinsic axon population first, then sampled footprints for that population.
 
 ```python
-from axonscope.integrations import nrv as axs_nrv
+from axonfleet.integrations import nrv as axs_nrv
 
 # `nerve` is an already-built NRV object with its extracellular stimulation.
 axons = axs_nrv.population_from_nrv(
@@ -290,7 +288,7 @@ Stimulation objects stay descriptive. During execution, the selected backend
 lowers them into numerical callables or tensors:
 
 - `Stimulus` becomes a temporal waveform representation;
-- `IntracellularContext` objects become current-density injection inputs;
+- `IntracellularCurrentClamp` objects become current-density injection inputs;
 - `ExtracellularStimulation` objects become imposed-potential inputs, including
   dense or factorized footprint tensors when a batch route can use them.
 

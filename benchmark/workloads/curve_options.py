@@ -209,7 +209,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     preset = PRESETS["quick"]
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--preset", choices=tuple(PRESETS), default="quick")
-    parser.add_argument("--source", choices=("point_source_axonscope", "nrv_nerve"), default="point_source_axonscope")
+    parser.add_argument("--source", choices=("point_source_axonfleet", "nrv_nerve"), default="point_source_axonfleet")
     parser.add_argument("--tsim", type=float)
     parser.add_argument("--dt", type=float)
     parser.add_argument("--nx", type=int)
@@ -217,12 +217,6 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--precision", choices=("fp32", "fp64"))
     parser.add_argument("--recording", choices=("full_vm", "probe_vm", "observer_only"))
     parser.add_argument("--cable", choices=("single_cable", "double_cable"), default="single_cable")
-    parser.add_argument(
-        "--single-cable-solver",
-        choices=("auto", "jax_tridiagonal"),
-        default="auto",
-        help="Typed public single-cable solver policy for JAX single-cable runs.",
-    )
     parser.add_argument(
         "--double-cable-block-solver",
         choices=("auto", "thomas", "tiled_thomas"),
@@ -323,7 +317,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
         metavar="{default,unchunked,N}",
         help=(
             "Observer/kernel time chunk policy. Omit or use 'default' to let "
-            "AxonScope choose its recording-specific default, use 'unchunked' "
+            "AxonFleet choose its recording-specific default, use 'unchunked' "
             "or 'none' to force one full scan, or pass an integer chunk size."
         ),
     )
@@ -369,7 +363,6 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "precision": args.precision or preset.precision,
         "recording": args.recording or preset.recording,
         "cable": args.cable,
-        "single_cable_solver": args.single_cable_solver,
         "double_cable_block_solver": args.double_cable_block_solver,
         "tiled_thomas_block_b": args.tiled_thomas_block_b,
         "benchmark_observer_state_scope": args.benchmark_observer_state_scope,
@@ -417,8 +410,6 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "amplitude_batch_size": args.amplitude_batch_size,
         "retention": args.retention,
     }
-    if hasattr(args, "threshold_kind"):
-        options["threshold_kind"] = args.threshold_kind
     if hasattr(args, "amplitude_count"):
         options["amplitude_count"] = (
             args.amplitude_count
@@ -542,13 +533,6 @@ def write_cases_csv(output: Path, script_name: str, options: dict[str, Any]) -> 
         writer.writeheader()
         writer.writerow(row)
     return path
-
-
-def unsupported_real_run(script_name: str) -> int:
-    raise SystemExit(
-        f"{script_name} real runs are not implemented yet; use --dry-run while P11A "
-        "case lists are being validated."
-    )
 
 
 def case_name(script_name: str, options: dict[str, Any]) -> str:

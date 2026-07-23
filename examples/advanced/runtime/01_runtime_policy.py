@@ -10,7 +10,7 @@ example or notebook.
 
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:

@@ -5,12 +5,12 @@ import pytest
 
 import nrv
 
-from axonscope import um
-from axonscope.axons.templates._mrg_morphology import (
+from axonfleet import um
+from axonfleet.axons.templates._mrg_morphology import (
     available_mrg_fiber_diameters,
     get_mrg_morphology,
 )
-from axonscope.axons import mrg_like_length_from_nodes
+from axonfleet.axons.templates.mrg_like_double_cable import mrg_like_length_from_nodes
 
 
 FIELDS = ("g", "axonD", "nodeD", "paraD1", "paraD2", "deltax", "paralength2", "nl")

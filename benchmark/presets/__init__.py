@@ -1,2 +1,0 @@
-"""Named benchmark scale presets."""
-

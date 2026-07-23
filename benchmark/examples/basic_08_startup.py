@@ -126,8 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         importlib.import_module("matplotlib.pyplot")
     with phases.phase("import.numpy"):
         np = importlib.import_module("numpy")
-    with phases.phase("import.axonscope"):
-        axs = importlib.import_module("axonscope")
+    with phases.phase("import.axonfleet"):
+        axs = importlib.import_module("axonfleet")
     modules_after = set(sys.modules)
     import_end = time.perf_counter_ns()
 
@@ -401,7 +401,7 @@ def _build_workload(
             pool.append(simulation)
 
     with phases.phase("protocol.criterion_and_update"):
-        criterion = axs.analysis.ActivationCriterion(
+        criterion = axs.analysis.Activation(
             threshold=0.0 * axs.mV,
             blanking=stim_start,
             target=axs.positions.ALL,

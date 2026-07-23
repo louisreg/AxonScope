@@ -6,8 +6,8 @@ Run:
 
 import matplotlib.pyplot as plt
 
-import axonscope as axs
-from axonscope.axons import HodgkinHuxley
+import axonfleet as axs
+from axonfleet.axons import HodgkinHuxley
 
 
 def main() -> None:

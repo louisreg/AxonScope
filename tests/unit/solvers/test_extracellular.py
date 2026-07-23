@@ -4,16 +4,16 @@ import numpy as np
 import pytest
 from scipy.signal import find_peaks
 
-import axonscope as axs
-from axonscope import AxonInstance
-from axonscope.axons import Axon, Layout, Section
-from axonscope.axons.myelinated import MRG
-from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.runtime.jax.inputs.extracellular import build_vstim_midpoint_batch
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import Stimulus
-from axonscope.utils import units
-from axonscope.timebase import simulation_step_count
+import axonfleet as axs
+from axonfleet import AxonInstance
+from axonfleet.axons import Axon, Layout, Section
+from axonfleet.axons.myelinated import MRG
+from axonfleet.axons.unmyelinated import HodgkinHuxley
+from axonfleet.runtime.jax.inputs.extracellular import build_vstim_midpoint_batch
+from axonfleet.analytical import PointSourceElectrode
+from axonfleet.stimulation import Stimulus
+from axonfleet.utils import units
+from axonfleet.runtime.timebase import simulation_step_count
 
 
 def _run_public_batch(axon: AxonInstance, *, tsim: float, dt: float, recording=None):
@@ -139,7 +139,9 @@ def test_add_extracellular_stimulation_requires_typed_stimulation():
     )
 
     assert ax.use_extracellular is True
-    vext = np.asarray(ax.extracellular_potential_mV(0.31))
+    vext = np.asarray(
+        ax.extracellular_stimulation.evaluate([0.31], voltage_unit="millivolt")[0]
+    )
     assert np.max(np.abs(vext)) > 0.0
 
 
@@ -174,7 +176,9 @@ def test_extracellular_stimulation_accumulates_multiple_drives():
         ),
         replace=True,
     )
-    got_mV = np.asarray(ax.extracellular_potential_mV(t_probe))
+    got_mV = np.asarray(
+        ax.extracellular_stimulation.evaluate([t_probe], voltage_unit="millivolt")[0]
+    )
 
     assert np.allclose(got_mV, expected_mV, rtol=1e-6, atol=1e-6)
 
@@ -261,7 +265,10 @@ def test_myelinated_vext_matches_analytic_point_source():
     x_m = np.asarray(ax.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     r = np.sqrt((x_m - x0_um * 1e-6) ** 2 + (100e-6) ** 2)
     expected_mV = amp_A / (4.0 * np.pi * sigma_S_m * np.maximum(r, 1e-12)) * 1e3
-    got_mV = np.asarray(ax.extracellular_potential_mV(0.5), dtype=float)
+    got_mV = np.asarray(
+        ax.extracellular_stimulation.evaluate([0.5], voltage_unit="millivolt")[0],
+        dtype=float,
+    )
 
     assert np.allclose(got_mV, expected_mV, rtol=1e-6, atol=1e-6)
 
@@ -305,33 +312,12 @@ def test_myelinated_extracellular_stimulus_has_nonzero_effect():
     assert max_delta > 1.0
 
 
-def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
-    ax = _passive_axon(L=100.0, d=1.0, Nx=5, v_init=-70.0 * axs.mV)
-    ax.set_extracellular_layer(
-        xraxial_MOhm_per_cm=np.full((ax.n_compartments,), 1e9, dtype=float),
-        xg_S_per_cm2=np.full((ax.n_compartments,), 1e-3, dtype=float),
-        xc_uF_per_cm2=np.full((ax.n_compartments,), 0.1, dtype=float),
-        use_extracellular=True,
-        Veinit=50.0,
-    )
-    _attach_uniform_stimulation(
-        ax,
-        footprint_v_per_a=1000.0,
-        stimulus=Stimulus.constant(50e-6, start=0.0 * axs.ms),
-    )
-
-    res = _run_public_batch(ax, tsim=0.5, dt=0.01)
-
-    np.testing.assert_allclose(np.asarray(res.Vm), -70.0, rtol=0.0, atol=2e-3)
-
-
 def test_public_batch_path_uses_vstim_forcing_for_single_cable_extracellular():
     def build_axon(*, with_extracellular: bool = True) -> AxonInstance:
         ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
         ax.add_current_clamp(position=200.0 * axs.um,
             current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
         )
-        ax.set_extracellular_layer(Veinit=20.0)
         if with_extracellular:
             _attach_uniform_stimulation(
                 ax,
@@ -365,7 +351,7 @@ def test_single_cable_vstim_default_uses_inline_forcing():
 def test_myelinated_uses_inline_double_cable_solver():
     ax = AxonInstance(MRG(diameter=10.0 * axs.um, nodes=5))
     center_node = int(ax.node_indices.shape[0] // 2)
-    pos_um = float(ax.x_nodes_um[center_node])
+    pos_um = float(ax.node_position_values(unit=axs.um)[center_node])
     ax.add_current_clamp(position=pos_um * axs.um,
         current=Stimulus.pulse(start=0.5 * axs.ms, duration=0.05 * axs.ms, amplitude=1.0),
     )
@@ -379,7 +365,7 @@ def test_myelinated_uses_inline_double_cable_solver():
 def test_public_batch_path_runs_myelinated_with_extracellular():
     ax = AxonInstance(MRG(diameter=10.0 * axs.um, nodes=5))
     center_node = int(ax.node_indices.shape[0] // 2)
-    pos_um = float(ax.x_nodes_um[center_node])
+    pos_um = float(ax.node_position_values(unit=axs.um)[center_node])
     ax.add_current_clamp(position=pos_um * axs.um,
         current=Stimulus.pulse(start=0.5 * axs.ms, duration=0.05 * axs.ms, amplitude=1.5),
     )
@@ -403,17 +389,6 @@ def test_public_batch_path_runs_myelinated_with_extracellular():
 
 def test_public_batch_path_runs_unmyelinated_with_extracellular_and_vext():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
-
-    xraxial = np.full((ax.n_compartments,), 1e8, dtype=float)
-    xg = np.full((ax.n_compartments,), 1e-3, dtype=float)
-    xc = np.full((ax.n_compartments,), 0.01, dtype=float)
-    ax.set_extracellular_layer(
-        xraxial_MOhm_per_cm=xraxial,
-        xg_S_per_cm2=xg,
-        xc_uF_per_cm2=xc,
-        use_extracellular=True,
-        Veinit=0.0,
-    )
 
     electrode = _point_source_m(200e-6, 100e-6, 100e-6)
     stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)

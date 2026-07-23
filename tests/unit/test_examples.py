@@ -32,7 +32,7 @@ def _example_paths() -> tuple[Path, ...]:
 def _load_script(path: Path):
     relative = path.relative_to(REPO_ROOT)
     safe_name = re.sub(r"[^0-9a-zA-Z_]", "_", str(relative))
-    module_name = f"_axonscope_example_{safe_name}"
+    module_name = f"_axonfleet_example_{safe_name}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -51,11 +51,11 @@ def test_public_example_scripts_are_importable_and_have_main():
         assert callable(module.main), path
 
 
-def test_public_examples_do_not_import_axonscope_internals():
+def test_public_examples_do_not_import_axonfleet_internals():
     forbidden = (
-        "axonscope.runtime",
-        "from axonscope.solvers",
-        "import axonscope.solvers",
+        "axonfleet.runtime",
+        "from axonfleet.solvers",
+        "import axonfleet.solvers",
         "CrankNicholson",
     )
 
@@ -79,7 +79,7 @@ def test_basic_point_source_example_runs(monkeypatch):
 
 def test_pipeline_inspection_example_runs(monkeypatch):
     module = _load_script(
-        EXAMPLES_ROOT / "advanced" / "runtime" / "03_pipeline_inspection.py"
+        EXAMPLES_ROOT / "advanced" / "runtime" / "02_pipeline_inspection.py"
     )
     monkeypatch.setattr(plt, "show", lambda: None)
 

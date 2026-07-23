@@ -21,8 +21,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
-from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+import axonfleet as axs
+from axonfleet.runtime.jax.membranes.compile import compile_membrane_model
 
 
 DT_MS = 0.0125

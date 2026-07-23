@@ -1,11 +1,11 @@
 # Membranes
 
-`axonscope.membranes` is the public namespace for runtime-independent membrane
+`axonfleet.membranes` is the public namespace for runtime-independent membrane
 descriptions.
 
 Membrane objects are descriptive. They do not own JAX functions, solver
 backends, time stepping, or compiled state. Solvers translate covered built-ins
-and supported custom classes through AxonScope's internal compiler/runtime path.
+and supported custom classes through AxonFleet's internal compiler/runtime path.
 Public code should not import or construct compiler/runtime objects to describe
 a membrane.
 
@@ -16,7 +16,7 @@ axs.membranes.Model -> axon Section/Layout -> source compiler -> backend runtime
 ## Public Surface
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 membrane = axs.membranes.HodgkinHuxley(celsius=6.3)
 ```
@@ -24,7 +24,7 @@ membrane = axs.membranes.HodgkinHuxley(celsius=6.3)
 Built-in membrane names are classes that inherit `Model`. The class constructor
 gives autocomplete-friendly parameter names and validates units. The scientific
 definition lives in the matching standalone source file under
-`src/axonscope/membranes/models/`.
+`src/axonfleet/membranes/models/`.
 
 ```python
 assert issubclass(axs.membranes.HodgkinHuxley, axs.membranes.Model)
@@ -58,7 +58,7 @@ Built-in model classes:
 The package layout mirrors these responsibilities:
 
 ```text
-src/axonscope/membranes/
+src/axonfleet/membranes/
   model.py           Model base class, runtime descriptors, decorators
   builtins.py        public re-exports of source-backed model classes
   compiler.py        internal source loader and public-parameter normalizer
@@ -68,14 +68,14 @@ src/axonscope/membranes/
 ```
 
 Each built-in model is owned by exactly one file in
-`src/axonscope/membranes/models/`. That file must contain the model equations,
+`src/axonfleet/membranes/models/`. That file must contain the model equations,
 unit-bearing parameter defaults, public aliases, and any derived parameter
 logic needed for construction. `builtins.py` must not duplicate equations or
 defaults; it only re-exports the public classes.
 
 ## Units
 
-Most scalar membrane parameters may be passed as plain numbers in AxonScope's
+Most scalar membrane parameters may be passed as plain numbers in AxonFleet's
 canonical membrane units. Pint quantities are accepted and converted at the
 public construction boundary. Geometry-like public parameters such as
 `diameter` must carry length units. `Model.params` reports the normalized
@@ -103,7 +103,7 @@ names (`gnabar`, `ena`, `diameter_um`) instead of relying on suffixes to carry
 unit meaning.
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 hh = axs.membranes.HodgkinHuxley(
     gnabar=120.0 * axs.mS_per_cm2,
@@ -125,7 +125,7 @@ tigerholm = axs.membranes.Tigerholm(
 Built-in axon templates keep their ergonomic model-specific keyword API, but
 those keywords are only forwarded to the matching membrane source. Valid units,
 defaults, aliases, equations, and derived parameter logic are defined by the
-matching file in `src/axonscope/membranes/models/`, not by the axon template.
+matching file in `src/axonfleet/membranes/models/`, not by the axon template.
 
 ```python
 axon = axs.axons.HodgkinHuxley(
@@ -146,7 +146,7 @@ reason, generated graph hashes, and generated files without exposing the
 internal representation as a user API.
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 model = axs.membranes.HodgkinHuxley(celsius=6.3 * axs.degC)
 report = model.inspect_generated_code()
@@ -180,15 +180,15 @@ report = axs.membranes.inspect_generated_code(
 ```
 
 Generated artifacts are cached under
-`.axonscope_cache/model_codegen/<cache_key>/` unless
-`AXONSCOPE_MODEL_CODEGEN_CACHE` points elsewhere. The cache key includes the
+`.axonfleet_cache/model_codegen/<cache_key>/`. `AXONFLEET_CACHE` relocates the
+whole artifact tree or disables persistence when set to `off`. The cache key includes the
 model source hash, selected class name, source/compiler/schema/helper/decorator
 versions, generated targets, and static source metadata. Runtime parameter
 values do not force regeneration unless a future parameter is declared
 structural/static. Corrupt manifests, missing generated files, source changes,
 or compiler/schema/helper/decorator version bumps are treated as misses and the
-directory is regenerated. It is always safe to delete `.axonscope_cache/`; the
-next inspection or run rebuilds missing artifacts.
+directory is regenerated. Use `axs.cache.inspect()` and `axs.cache.clean()` for
+maintenance; see `docs/cache.md` for retention and invalidation policy.
 
 ## Composite Membranes
 
@@ -225,7 +225,7 @@ without deserializing or recomposing the graph. Parameter values remain runtime
 inputs, so changing them reuses the same generated code.
 
 Generated modules carry the names and column groups needed by public recording
-for gates, currents, conductances, membrane states, and diagnostics. AxonScope
+for gates, currents, conductances, membrane states, and diagnostics. AxonFleet
 validates those groups and their callable output signatures while loading the
 module, before a solver can execute it. Model-specific generic observables are
 available to compilation and inspection but are not implicitly added as a new
@@ -243,7 +243,7 @@ membrane = axs.membranes.Composite(
 )
 ```
 
-For a non-ambiguous sequence, AxonScope derives labels from the component model
+For a non-ambiguous sequence, AxonFleet derives labels from the component model
 kind. If a sequence contains the same model kind twice, construction fails and
 requires explicit labels. Labels must be stable snake_case identifiers.
 
@@ -258,7 +258,7 @@ instead of exposed as arbitrary suffixed columns.
 Custom membrane authoring uses the same class shape as built-ins: subclass
 `axs.membranes.Model`, declare typed parameter fields, write equation sections
 as plain Python methods, and pass an instance anywhere a membrane is accepted.
-AxonScope compiles the class source into a backend-ready semantic graph and
+AxonFleet compiles the class source into a backend-ready semantic graph and
 generated runtime artifacts.
 
 The rejected builder-style surface and the old module-level
@@ -267,7 +267,7 @@ internal graph is compiler/runtime machinery and should not appear in examples
 except through inspection/explain reports.
 
 ```python
-from axonscope.membranes.types import CurrentDensity, ResistanceArea, Voltage
+from axonfleet.membranes.types import CurrentDensity, ResistanceArea, Voltage
 
 
 class Leak(axs.membranes.Model):
@@ -332,11 +332,11 @@ The current authoring subset is intentionally small:
 
 - model classes inherit `axs.membranes.Model`;
 - model parameters are annotated class fields with unit-bearing defaults;
-- annotations use semantic types from `axonscope.membranes.types`;
+- annotations use semantic types from `axonfleet.membranes.types`;
 - defaults and equations may use direct units, `units.<name>`, or `axs.<name>`
   for compiler-known unit aliases;
 - equation bodies use assignments, annotated assignments, returns,
-  arithmetic, comparisons, and supported helpers from `axonscope.membranes.math`;
+  arithmetic, comparisons, and supported helpers from `axonfleet.membranes.math`;
 - `self.<field>` reads model parameters and `self.<symbol>` reads compiler
   symbols produced by another section;
 - `@rates`, `@currents`, `@mechanism(...)`, `@initials(...)`, and `@step(...)`
@@ -348,7 +348,7 @@ The current authoring subset is intentionally small:
   duplicate assignments, cycles, and stale manifest fields fail at compile
   time with source locations when available.
 
-Supported equation helpers currently live in `axonscope.membranes.math`:
+Supported equation helpers currently live in `axonfleet.membranes.math`:
 `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
 `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, `rates_from_tau_inf`, and
 `safe_exp`.
@@ -357,7 +357,7 @@ gate value and time constant into the corresponding forward/backward rates.
 
 Currently unsupported: arbitrary Python side effects, loops, mutation, dynamic
 attribute creation, class-level `exports`/`dynamics`, manual construction of
-internal runtime descriptors, direct imports from `axonscope.model_ir`,
+internal runtime descriptors, direct imports from `axonfleet.model_ir`,
 backend-local extension classes, and stateful `Composite` components. See
 `examples/advanced/axon_models/05_custom_membrane_authoring.py` for the accepted
 class style.
@@ -393,9 +393,9 @@ membrane lowering.
 
 ## Runtime Boundary
 
-Public axon construction must use `axonscope.membranes` descriptions. Passive,
+Public axon construction must use `axonfleet.membranes` descriptions. Passive,
 Hodgkin-Huxley, Rattay-Aberham, Sundt, AxNode, Gaines, Tigerholm, Schild,
-Nav1.x, and supported composites compile through AxonScope's internal compiler
+Nav1.x, and supported composites compile through AxonFleet's internal compiler
 path before reaching the active backend runtime.
 
 The runtime bridge is structural: backend kernels consume solver-facing terms

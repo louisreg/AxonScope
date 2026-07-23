@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.runtime.jax.kernels import double_cable_step
-from axonscope.runtime.jax.membranes.backend import (
+from axonfleet.runtime.jax.kernels import double_cable_step
+from axonfleet.runtime.jax.membranes.backend import (
     GatedLeakStackMembraneBackend,
     advance_stateless_membrane_terms,
 )
-from axonscope.runtime.jax.membranes import triton_generated
+from axonfleet.runtime.jax.membranes import triton_generated
 
 
 def test_stateless_membrane_step_prefers_generated_terms():
@@ -221,7 +221,6 @@ def test_double_cable_gpu_solve_reuses_precomputed_membrane_terms(monkeypatch):
         linear_static_xb=object(),
         batch_size=batch_size,
         nx=nx,
-        double_cable_block_solver="jax_triton_loop_xb",
         tiled_thomas_block_b=128,
         membrane_terms=(Gm, GE),
     )

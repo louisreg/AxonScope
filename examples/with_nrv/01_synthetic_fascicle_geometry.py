@@ -1,4 +1,4 @@
-"""Run AxonScope on the synthetic two-fascicle NRV tutorial geometry.
+"""Run AxonFleet on the synthetic two-fascicle NRV tutorial geometry.
 
 Run:
     python examples/with_nrv/01_synthetic_fascicle_geometry.py
@@ -6,7 +6,7 @@ Run:
 The geometry follows NRV tutorial 4: a cylindrical nerve with one circular
 fascicle and one custom CShape elliptical fascicle. The remaining workflow is
 the same as the realistic fascicle example: NRV owns geometry/fiber placement
-and LIFE/FEM footprint sampling, then AxonScope runs the recruitment sweep.
+and LIFE/FEM footprint sampling, then AxonFleet runs the recruitment sweep.
 """
 
 from __future__ import annotations

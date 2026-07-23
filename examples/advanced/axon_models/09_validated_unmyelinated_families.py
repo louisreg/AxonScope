@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 @dataclass(frozen=True)

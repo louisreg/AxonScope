@@ -195,7 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark/results/p11b_time_chunk_sweep"),
+        default=Path("benchmark/results/time_chunk_sweep"),
         help="Campaign output directory. Each policy gets a child result directory.",
     )
     parser.add_argument("--python", default=sys.executable)

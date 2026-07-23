@@ -12,9 +12,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonInstance, S_per_m, degC, mV, ms, um
-from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
-from axonscope.axons.unmyelinated import (
+from axonfleet import AxonInstance, S_per_m, degC, mV, ms, um
+from axonfleet.axons.myelinated import GainesMotor, GainesSensory, MRG
+from axonfleet.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
     Schild94,
@@ -22,23 +22,21 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.analytical import PointSourceElectrode, point_source_stimulation
-from axonscope.stimulation import Stimulus
+from axonfleet.analytical import PointSourceElectrode, point_source_stimulation
+from axonfleet.stimulation import Stimulus
 from tests.nrv._helpers import (
-    AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE,
-    AXONSCOPE_TO_NRV_CURRENT_SCALE,
+    AXONFLEET_TO_NRV_CONDUCTANCE_SCALE,
+    AXONFLEET_TO_NRV_CURRENT_SCALE,
     align_rows_to_target_x,
-    axonscope_x_um,
+    axonfleet_x_um,
     enable_nrv_recordings,
     interp_rows,
     normalize_nrv_matrix,
     nrv_trace,
-    run_axonscope_simulation,
+    run_axonfleet_simulation,
     sample_indices_from_position,
     trace_metrics,
 )
-
-pytestmark = pytest.mark.nrv_extracellular
 
 FIG_DIR = Path("figures/nrv_tests/extracellular")
 SIGMA_S_M = 0.2
@@ -50,7 +48,7 @@ ELECTRODE_Z_UM = 0.0
 class ExtracellularSpec:
     name: str
     diameters_um: tuple[float, ...]
-    axonscope_factory: Callable[[float], object]
+    axonfleet_factory: Callable[[float], object]
     nrv_factory: Callable[[float, object, float], object]
     tsim_ms: float
     dt_ms: float
@@ -228,7 +226,7 @@ def _make_schild97_extra_nrv(d: float, _axon_as, dt_ms: float):
 def _mrg_center_node_pos_um(ax: MRG) -> tuple[int, float]:
     node_ids = np.asarray(ax.node_indices, dtype=int)
     stim_node = int(node_ids.shape[0] // 2)
-    stim_pos_um = float(axonscope_x_um(ax)[int(node_ids[stim_node])])
+    stim_pos_um = float(axonfleet_x_um(ax)[int(node_ids[stim_node])])
     return stim_node, stim_pos_um
 
 
@@ -360,7 +358,7 @@ SPECS = [
     ExtracellularSpec(
         name="hh",
         diameters_um=(0.5, 0.75, 1.0),
-        axonscope_factory=_make_hh_extra_axon,
+        axonfleet_factory=_make_hh_extra_axon,
         nrv_factory=_make_hh_extra_nrv,
         tsim_ms=8.0,
         dt_ms=0.001,
@@ -383,7 +381,7 @@ SPECS = [
     ExtracellularSpec(
         name="rattay",
         diameters_um=(0.4, 0.6, 0.8),
-        axonscope_factory=_make_rattay_extra_axon,
+        axonfleet_factory=_make_rattay_extra_axon,
         nrv_factory=_make_rattay_extra_nrv,
         tsim_ms=10.0,
         dt_ms=0.01,
@@ -405,7 +403,7 @@ SPECS = [
     ExtracellularSpec(
         name="sundt",
         diameters_um=(0.5, 0.65, 0.8),
-        axonscope_factory=_make_sundt_extra_axon,
+        axonfleet_factory=_make_sundt_extra_axon,
         nrv_factory=_make_sundt_extra_nrv,
         tsim_ms=8.0,
         dt_ms=0.001,
@@ -428,7 +426,7 @@ SPECS = [
     ExtracellularSpec(
         name="tigerholm",
         diameters_um=(0.5, 0.75, 1.0),
-        axonscope_factory=_make_tigerholm_extra_axon,
+        axonfleet_factory=_make_tigerholm_extra_axon,
         nrv_factory=_make_tigerholm_extra_nrv,
         tsim_ms=20.0,
         dt_ms=0.025,
@@ -468,7 +466,7 @@ SPECS = [
     ExtracellularSpec(
         name="schild94",
         diameters_um=(0.8, 0.9, 1.0),
-        axonscope_factory=_make_schild94_extra_axon,
+        axonfleet_factory=_make_schild94_extra_axon,
         nrv_factory=_make_schild94_extra_nrv,
         tsim_ms=12.0,
         dt_ms=0.005,
@@ -508,7 +506,7 @@ SPECS = [
     ExtracellularSpec(
         name="schild97",
         diameters_um=(0.8, 0.9, 1.0),
-        axonscope_factory=_make_schild97_extra_axon,
+        axonfleet_factory=_make_schild97_extra_axon,
         nrv_factory=_make_schild97_extra_nrv,
         tsim_ms=12.0,
         dt_ms=0.005,
@@ -546,7 +544,7 @@ SPECS = [
     ExtracellularSpec(
         name="mrg",
         diameters_um=(8.7, 10.0),
-        axonscope_factory=_make_mrg_extra_axon,
+        axonfleet_factory=_make_mrg_extra_axon,
         nrv_factory=_make_mrg_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -577,7 +575,7 @@ SPECS = [
     ExtracellularSpec(
         name="gaines_motor",
         diameters_um=(8.7, 10.0, 14.0),
-        axonscope_factory=_make_gaines_motor_extra_axon,
+        axonfleet_factory=_make_gaines_motor_extra_axon,
         nrv_factory=_make_gaines_motor_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.001,
@@ -598,7 +596,7 @@ SPECS = [
     ExtracellularSpec(
         name="gaines_sensory",
         diameters_um=(8.7, 10.0, 14.0),
-        axonscope_factory=_make_gaines_sensory_extra_axon,
+        axonfleet_factory=_make_gaines_sensory_extra_axon,
         nrv_factory=_make_gaines_sensory_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.001,
@@ -653,14 +651,22 @@ def _compare_vext_profiles(
     if t_edges_ms.size < 2:
         return None
 
-    x_as_um = axonscope_x_um(axon_as)
+    x_as_um = axonfleet_x_um(axon_as)
     x_nrv_um = np.asarray(x_nrv_um, dtype=float).ravel()
     if x_nrv_um.size == 0:
         return None
 
     t_probe_ms = 0.5 * (t_edges_ms[:-1] + t_edges_ms[1:])
     vext_as_mV = np.stack(
-        [np.asarray(axon_as.extracellular_potential_mV(float(ti)), dtype=float) for ti in t_probe_ms],
+        [
+            np.asarray(
+                axon_as.extracellular_stimulation.evaluate(
+                    [float(ti)], voltage_unit="millivolt"
+                )[0],
+                dtype=float,
+            )
+            for ti in t_probe_ms
+        ],
         axis=1,
     )
     vext_nrv_mV = np.stack(
@@ -731,7 +737,7 @@ def _plot_extracellular_report(
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     fig, axs = plt.subplots(4, 2, figsize=(16, 18), constrained_layout=True)
 
-    axs[0, 0].plot(t_as, vm_local_as, lw=2.0, zorder=2, label="AxonScope")
+    axs[0, 0].plot(t_as, vm_local_as, lw=2.0, zorder=2, label="AxonFleet")
     axs[0, 0].plot(t_as, vm_local_nrv, "--", lw=2.2, zorder=4, label="NRV")
     axs[0, 0].set_title(f"{spec.name} d={diameter_um:.3f} um local Vm")
     axs[0, 0].set_xlabel("Time [ms]")
@@ -741,7 +747,7 @@ def _plot_extracellular_report(
 
     ax_vext = axs[0, 1]
     if t_vext_ms is not None and vext_local_as is not None and vext_local_nrv is not None:
-        ax_vext.plot(t_vext_ms, vext_local_as, lw=2.0, zorder=2, label="AxonScope")
+        ax_vext.plot(t_vext_ms, vext_local_as, lw=2.0, zorder=2, label="AxonFleet")
         ax_vext.plot(t_vext_ms, vext_local_nrv, "--", lw=2.2, zorder=4, label="NRV")
         ax_vext.legend()
     else:
@@ -758,7 +764,7 @@ def _plot_extracellular_report(
         extent=[float(t_as[0]), float(t_as[-1]), float(x_as_um[0]), float(x_as_um[-1])],
         cmap="viridis",
     )
-    axs[1, 0].set_title("AxonScope heatmap")
+    axs[1, 0].set_title("AxonFleet heatmap")
     axs[1, 0].set_xlabel("Time [ms]")
     axs[1, 0].set_ylabel("Position [um]")
     fig.colorbar(im_as, ax=axs[1, 0], label="Vm [mV]")
@@ -770,7 +776,7 @@ def _plot_extracellular_report(
         extent=[float(t_as[0]), float(t_as[-1]), float(x_as_um[0]), float(x_as_um[-1])],
         cmap="viridis",
     )
-    axs[1, 1].set_title("NRV heatmap (aligned on AxonScope x)")
+    axs[1, 1].set_title("NRV heatmap (aligned on AxonFleet x)")
     axs[1, 1].set_xlabel("Time [ms]")
     axs[1, 1].set_ylabel("Position [um]")
     fig.colorbar(im_nrv, ax=axs[1, 1], label="Vm [mV]")
@@ -846,11 +852,11 @@ def _matrix_metrics(as_matrix: np.ndarray, nrv_matrix: np.ndarray) -> tuple[floa
 
 
 def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None:
-    axon = spec.axonscope_factory(float(diameter_um))
+    axon = spec.axonfleet_factory(float(diameter_um))
     record_observables = bool(
         spec.current_pairs or spec.conductance_pairs or spec.gate_pairs or spec.state_pairs
     )
-    res = run_axonscope_simulation(
+    res = run_axonfleet_simulation(
         axon,
         tsim=spec.tsim_ms,
         dt=spec.dt_ms,
@@ -864,7 +870,7 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
     results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)
 
     t_as = np.asarray(res.t, dtype=float)
-    as_x_um = axonscope_x_um(axon)
+    as_x_um = axonfleet_x_um(axon)
     vm_as_matrix = np.asarray(res.Vm, dtype=float).T
     t_nrv = np.asarray(results_nrv["t"], dtype=float).ravel()
     x_nrv = np.asarray(results_nrv["x_rec"], dtype=float)
@@ -882,7 +888,7 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
         vext_local_nrv = None
         vext_rmse = float("nan")
         vext_max_abs = float("nan")
-        failures = [f"{spec.name} d={diameter_um:.3f} could not align Vext profiles between AxonScope and NRV"]
+        failures = [f"{spec.name} d={diameter_um:.3f} could not align Vext profiles between AxonFleet and NRV"]
     else:
         t_vext_ms, vext_as_matrix, vext_nrv_matrix = vext_cmp[:3]
         vext_local_as = np.asarray(vext_as_matrix[sample_as_idx], dtype=float)
@@ -906,8 +912,8 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
         f"Vm matrix RMSE: {matrix_rmse:8.4f} mV",
         f"Vm matrix corr: {matrix_corr:8.4f}",
         f"Shift steps   : I={spec.current_time_shift_steps:+d}, g={spec.conductance_time_shift_steps:+d}, gates={spec.gate_time_shift_steps:+d}, states={spec.state_time_shift_steps:+d}",
-        "Currents: AxonScope traces scaled by 1e-3 to match NRV current units",
-        "Conductances: AxonScope traces scaled by 1e-3 to match NRV conductance units",
+        "Currents: AxonFleet traces scaled by 1e-3 to match NRV current units",
+        "Conductances: AxonFleet traces scaled by 1e-3 to match NRV conductance units",
     ]
 
     node_mask = np.asarray(getattr(axon, "node_mask", np.array([], dtype=bool)), dtype=bool).ravel()
@@ -925,7 +931,7 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
 
     current_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.current_pairs:
-        as_trace = AXONSCOPE_TO_NRV_CURRENT_SCALE * _recorded_trace(res, "currents", as_name, sample_as_idx)
+        as_trace = AXONFLEET_TO_NRV_CURRENT_SCALE * _recorded_trace(res, "currents", as_name, sample_as_idx)
         nrv_trace_ref = nrv_trace(
             results_nrv,
             _resolve_nrv_key(spec, nrv_name),
@@ -943,7 +949,7 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
 
     conductance_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.conductance_pairs:
-        as_trace = AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE * _recorded_trace(
+        as_trace = AXONFLEET_TO_NRV_CONDUCTANCE_SCALE * _recorded_trace(
             res, "conductances", as_name, sample_as_idx
         )
         nrv_trace_ref = nrv_trace(

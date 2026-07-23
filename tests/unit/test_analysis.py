@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.results import AxonSimulationResult
-from axonscope.results.pool import _ResultBlock
+import axonfleet as axs
+from axonfleet.results import AxonSimulationResult
+from axonfleet.results.pool import _ResultBlock
 from tests.helpers import FakeSingleAxonResult
 
 
@@ -58,9 +58,9 @@ def _fake_pool_result() -> AxonSimulationResult:
 
 def test_analysis_namespace_is_public_and_not_results_forwarding_alias():
     assert not hasattr(axs.results, "analysis")
-    assert axs.Activation is axs.analysis.Activation
-    assert axs.analysis.ActivationCriterion is not None
-    assert axs.AnalysisStatus.VALID.value == "VALID"
+    assert not hasattr(axs, "Activation")
+    assert axs.analysis.Activation is not None
+    assert axs.analysis.AnalysisStatus.VALID.value == "VALID"
 
 
 def test_activation_definition_declares_requirements_and_statuses():
@@ -73,15 +73,13 @@ def test_activation_definition_declares_requirements_and_statuses():
     analyzed = definition.evaluate(result)
 
     assert analyzed.name == "activation"
-    assert analyzed.row_label == 0
+    assert analyzed.row_labels == (0,)
     assert analyzed.status is axs.analysis.AnalysisStatus.VALID
     assert analyzed.value is True
     assert analyzed.events[0].first_index == 1
     assert definition.requirements.required_signals == (axs.signals.Vm,)
     assert definition.requirements.required_result_fields == ("Vm", "t", "positions")
-    assert definition.requirements.required_capabilities == ("membrane_voltage_trace",)
     assert definition.requirements.required_positions == (axs.positions.CENTER,)
-    assert definition.requirements.online_supported is True
     assert definition.requirements.algorithm_version == "activation_threshold_v1"
     assert definition.requirements.recording_hint is not None
 
@@ -103,7 +101,7 @@ def test_result_analyze_returns_report_with_population_denominators():
 
 
 def test_population_activation_dense_fast_path_matches_events(monkeypatch):
-    from axonscope.analysis import definitions as analysis_definitions
+    from axonfleet.analysis import definitions as analysis_definitions
 
     result = _fake_pool_result()
     definition = axs.analysis.Activation(
@@ -144,7 +142,7 @@ def test_analysis_report_views_format_dataframe_and_plot(capsys):
     rows = axs.analysis.views.analysis_report_rows(report)
     dataframe = report.to_dataframe()
 
-    assert "AxonScope analysis report" in text
+    assert "AxonFleet analysis report" in text
     assert report.rows() == rows
     assert report["activation"].rows() == axs.analysis.views.analysis_result_rows(
         report["activation"]
@@ -186,16 +184,16 @@ def test_analysis_missing_input_is_reported_per_row():
     assert analyzed.status is axs.analysis.AnalysisStatus.MISSING_INPUT
     assert analyzed.population.n_failed == 1
     assert "membrane-voltage" in analyzed.messages[0]
-    assert len(analyzed.missing_input_requirements) == 1
-    requirement = analyzed.missing_input_requirements[0]
+    requirement = analyzed.input_requirements[0]
+    assert requirement is not None
     assert requirement.required_signals == (axs.signals.Vm,)
     assert requirement.required_result_fields == ("Vm",)
     assert requirement.recording_hint is not None
 
 
 def test_non_membrane_voltage_analysis_is_not_applicable_until_supported():
-    custom = axs.Signal(
-        id=axs.SignalId("custom_signal_for_analysis_test"),
+    custom = axs.signals.Signal(
+        id=axs.identifiers.SignalId("custom_signal_for_analysis_test"),
         result_key="custom",
     )
     result = _fake_result()
@@ -251,16 +249,14 @@ def test_conduction_velocity_can_decode_vm_raster_observation():
     )
     result = AxonSimulationResult((cohort,), size=1)
 
-    decoded = axs.results.conduction_velocity_values_from_vm_raster(raster, velocity)
     analyzed = result.analyze(velocity)
 
-    np.testing.assert_allclose(decoded, [0.25])
     assert analyzed.status is axs.analysis.AnalysisStatus.VALID
     np.testing.assert_allclose(analyzed.values, [0.25])
 
 
 def test_conduction_velocity_is_vm_raster_compatible_observer():
-    from axonscope.runtime.output_contract import (
+    from axonfleet.runtime.outputs.contracts import (
         observers_are_vm_raster_compatible,
         vm_raster_definitions,
     )
@@ -269,38 +265,3 @@ def test_conduction_velocity_is_vm_raster_compatible_observer():
 
     assert observers_are_vm_raster_compatible((velocity,))
     assert vm_raster_definitions((velocity,)) == (velocity,)
-
-
-def test_activation_online_observer_cross_validates_posthoc_result():
-    result = _fake_result()
-    definition = axs.analysis.Activation(
-        threshold=0.0 * axs.mV,
-        target=axs.positions.CENTER,
-    )
-    observer = definition.online_observer(
-        positions=result.position_values(unit=axs.um) * axs.um,
-        original_indices=result.record_indices,
-    )
-
-    observer.update(result.t[:2000] * axs.ms, result.Vm[:2000] * axs.mV)
-    observer.update(result.t[2000:] * axs.ms, result.Vm[2000:] * axs.mV)
-    online = observer.finalize()
-    posthoc = result.analyze(definition)
-
-    assert isinstance(observer, axs.analysis.ActivationObserver)
-    assert observer.requirements == definition.requirements
-    assert online.value == posthoc.value
-    assert online.status is posthoc.status
-    assert online.events[0].first_index == posthoc.events[0].first_index
-    assert online.events[0].first_time_ms == pytest.approx(posthoc.events[0].first_time_ms)
-
-
-def test_peak_voltage_online_observer_is_not_public_api():
-    result = _fake_result()
-    definition = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
-
-    with pytest.raises(NotImplementedError, match="PeakVoltage is post-hoc"):
-        definition.online_observer(
-            positions=result.position_values(unit=axs.um) * axs.um,
-            original_indices=result.record_indices,
-        )

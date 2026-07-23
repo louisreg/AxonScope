@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from axonscope.preparation.membrane_rows import MembraneRowPlan
+from axonfleet.preparation.membrane_rows import MembraneRowPlan
 
 
 def _item(signature, *, nx=5, v_init=-70.0):

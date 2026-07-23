@@ -1,8 +1,8 @@
 import numpy as np
 
-import axonscope as axs
-from axonscope.dispatcher import build_dispatch_plan
-from axonscope.preparation.cohort import PreparedCohort
+import axonfleet as axs
+from axonfleet.dispatcher.plan import build_dispatch_plan
+from axonfleet.preparation.cohort import PreparedCohort
 
 
 def test_prepared_cohort_collects_group_rows():
@@ -25,5 +25,3 @@ def test_prepared_cohort_collects_group_rows():
     assert cohort.materialized_axons.template_count == 1
     assert cohort.stimulations == ((), ())
     assert np.asarray(cohort.x_positions_m).shape == (2, 11)
-    np.testing.assert_allclose(cohort.axon_y_um, [0.0, 0.0])
-    np.testing.assert_allclose(cohort.axon_z_um, [0.0, 0.0])

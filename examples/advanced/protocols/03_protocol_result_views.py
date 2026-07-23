@@ -14,53 +14,10 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-import axonscope as axs
+import axonfleet as axs
 
 
 def main() -> None:
-    history = (
-        axs.protocols.ThresholdHistoryEntry(
-            amplitude_uA=5.0,
-            activated=False,
-            event=axs.analysis.ActivationEvent(
-                activated=False,
-                peak_mV=-42.0,
-                peak_time_ms=0.35,
-                peak_index=20,
-            ),
-        ),
-        axs.protocols.ThresholdHistoryEntry(
-            amplitude_uA=15.0,
-            activated=True,
-            event=axs.analysis.ActivationEvent(
-                activated=True,
-                first_time_ms=0.62,
-                first_position_um=500.0,
-                first_index=50,
-                peak_mV=21.0,
-                peak_time_ms=0.68,
-                peak_index=52,
-            ),
-        ),
-        axs.protocols.ThresholdHistoryEntry(
-            amplitude_uA=10.0,
-            activated=False,
-            event=axs.analysis.ActivationEvent(
-                activated=False,
-                peak_mV=-5.0,
-                peak_time_ms=0.60,
-                peak_index=48,
-            ),
-        ),
-    )
-    search = axs.protocols.ThresholdSearchResult(
-        amplitude_uA=12.5,
-        lower_bound_uA=10.0,
-        upper_bound_uA=15.0,
-        status="threshold",
-        history=history,
-    )
-
     recruitment = axs.protocols.RecruitmentCurve(
         amplitudes_uA=np.asarray([0.0, 5.0, 10.0, 15.0, 20.0]),
         activated=np.asarray(
@@ -97,8 +54,6 @@ def main() -> None:
         satisfied=(np.asarray([False, True, True]), np.asarray([False, True, True])),
     )
 
-    print(search.format(unit=axs.uA))
-    print()
     print(recruitment.to_dataframe(unit=axs.uA).to_string(index=False))
     print()
     print(
@@ -120,15 +75,13 @@ def main() -> None:
     rows = recruitment.rows(unit=axs.uA)
     print(f"\nFirst recruitment view row: {rows[0]}")
 
-    fig, axes = plt.subplots(2, 2, figsize=(9.5, 6.5), constrained_layout=True)
-    search.plot(ax=axes[0, 0], unit=axs.uA)
-    axes[0, 0].set_title("Threshold search")
-    recruitment.plot(ax=axes[0, 1], unit=axs.uA)
-    axes[0, 1].set_title("Recruitment")
-    sweep.plot(ax=axes[1, 0], value_unit=axs.uA)
-    axes[1, 0].set_title("Pool sweep observation")
-    threshold_curve.plot(ax=axes[1, 1], row_unit=axs.um, threshold_unit=axs.uA)
-    axes[1, 1].set_title("Threshold curve")
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.8), constrained_layout=True)
+    recruitment.plot(ax=axes[0], unit=axs.uA)
+    axes[0].set_title("Recruitment")
+    sweep.plot(ax=axes[1], value_unit=axs.uA)
+    axes[1].set_title("Pool sweep observation")
+    threshold_curve.plot(ax=axes[2], row_unit=axs.um, threshold_unit=axs.uA)
+    axes[2].set_title("Threshold curve")
     plt.show()
 
 

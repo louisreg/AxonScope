@@ -12,9 +12,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonInstance, degC, mV, ms, um
-from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
-from axonscope.axons.unmyelinated import (
+from axonfleet import AxonInstance, degC, mV, ms, um
+from axonfleet.axons.myelinated import GainesMotor, GainesSensory, MRG
+from axonfleet.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
     Schild94,
@@ -22,19 +22,27 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.stimulation import Stimulus
-from tests.nrv._helpers import axonscope_x_um, run_axonscope_simulation
-
-pytestmark = pytest.mark.nrv_intracellular
+from axonfleet.stimulation import Stimulus
+from tests.nrv._helpers import (
+    AXONFLEET_TO_NRV_CURRENT_SCALE,
+    align_rows_to_target_x,
+    axonfleet_x_um,
+    enable_nrv_recordings,
+    interp_rows,
+    normalize_nrv_matrix,
+    nrv_trace as interpolate_nrv_trace,
+    run_axonfleet_simulation,
+    sample_indices_from_position,
+    trace_metrics,
+)
 
 FIG_DIR = Path("figures/nrv_tests/intracellular")
-AXONSCOPE_TO_NRV_CURRENT_SCALE = 1e-3
 
 
 @dataclass(frozen=True)
 class IntracellularSpec:
     name: str
-    axonscope_factory: Callable[[], object]
+    axonfleet_factory: Callable[[], object]
     nrv_factory: Callable[[object, float], object]
     tsim_ms: float
     dt_ms: float
@@ -54,53 +62,9 @@ class IntracellularSpec:
     nrv_key_overrides: dict[str, str] | None = None
 
 
-def _enable_nrv_recordings(axon_nrv) -> None:
-    axon_nrv.record_V_mem = True
-    axon_nrv.record_I_ions = True
-    axon_nrv.record_particles = True
-    if hasattr(axon_nrv, "record_particules"):
-        axon_nrv.record_particules = True
-
-
-def _normalize_nrv_matrix(values: np.ndarray, t_ms: np.ndarray, x_um: np.ndarray) -> np.ndarray:
-    arr = np.asarray(values, dtype=float)
-    if arr.ndim != 2:
-        raise ValueError(f"Expected a 2D NRV array, got shape {arr.shape}.")
-    if arr.shape == (x_um.size, t_ms.size):
-        return arr
-    if arr.shape == (t_ms.size, x_um.size):
-        return arr.T
-    if arr.shape[0] == x_um.size:
-        return arr
-    if arr.shape[1] == x_um.size:
-        return arr.T
-    raise ValueError(
-        f"Could not align NRV array of shape {arr.shape} with x={x_um.size} and t={t_ms.size}."
-    )
-
-
-def _interp_rows(values_by_space_time: np.ndarray, t_src_ms: np.ndarray, t_dst_ms: np.ndarray) -> np.ndarray:
-    out = np.empty((values_by_space_time.shape[0], t_dst_ms.size), dtype=float)
-    for i in range(values_by_space_time.shape[0]):
-        out[i] = np.interp(t_dst_ms, t_src_ms, values_by_space_time[i])
-    return out
-
-
-def _align_rows_to_target_x(
-    x_source_um: np.ndarray,
-    matrix_source: np.ndarray,
-    x_target_um: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    x_source = np.asarray(x_source_um, dtype=float).ravel()
-    matrix = np.asarray(matrix_source, dtype=float)
-    x_target = np.asarray(x_target_um, dtype=float).ravel()
-    idx = np.asarray([int(np.argmin(np.abs(x_source - xi))) for xi in x_target], dtype=int)
-    return x_target, matrix[idx], idx
-
-
 def _axonspace_vm_matrix(axon, res, matrix_mode: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     Vm = np.asarray(res.Vm, dtype=float)
-    x = axonscope_x_um(axon)
+    x = axonfleet_x_um(axon)
     if matrix_mode == "all":
         indices = np.arange(axon.n_compartments, dtype=int)
         return Vm.T, x, indices
@@ -113,29 +77,8 @@ def _axonspace_vm_matrix(axon, res, matrix_mode: str) -> tuple[np.ndarray, np.nd
 def _nrv_vm_matrix(results_nrv) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     t_nrv = np.asarray(results_nrv["t"], dtype=float).ravel()
     x_nrv = np.asarray(results_nrv["x_rec"], dtype=float)
-    Vm_nrv = _normalize_nrv_matrix(results_nrv["V_mem"], t_nrv, x_nrv)
+    Vm_nrv = normalize_nrv_matrix(results_nrv["V_mem"], t_nrv, x_nrv)
     return Vm_nrv, x_nrv, t_nrv
-
-
-def _sample_indices(
-    as_x_um: np.ndarray,
-    nrv_x_um: np.ndarray,
-    sample_position_um: float | None = None,
-) -> tuple[int, int]:
-    if sample_position_um is None:
-        return int(len(as_x_um) // 2), int(len(nrv_x_um) // 2)
-    return (
-        int(np.argmin(np.abs(np.asarray(as_x_um, dtype=float) - float(sample_position_um)))),
-        int(np.argmin(np.abs(np.asarray(nrv_x_um, dtype=float) - float(sample_position_um)))),
-    )
-
-
-def _trace_metrics(ref: np.ndarray, test: np.ndarray) -> tuple[float, float, float]:
-    diff = np.asarray(test, dtype=float) - np.asarray(ref, dtype=float)
-    rmse = float(np.sqrt(np.mean(diff**2)))
-    max_abs = float(np.max(np.abs(diff)))
-    q99_abs = float(np.quantile(np.abs(diff), 0.99))
-    return rmse, max_abs, q99_abs
 
 
 def _best_integer_lag(
@@ -159,7 +102,7 @@ def _best_integer_lag(
         else:
             ref_slice = ref_values
             test_slice = test_values
-        rmse, _, _ = _trace_metrics(ref_slice, test_slice)
+        rmse, _, _ = trace_metrics(ref_slice, test_slice)
         candidates.append((rmse, lag))
     best_rmse, best_lag = min(candidates)
     return best_lag, best_rmse
@@ -175,13 +118,6 @@ def _recorded_trace(res, group: str, name: str, compartment_index: int) -> np.nd
             raise KeyError(name)
         key = matches[0]
     return np.asarray(values[key], dtype=float)[:, compartment_index]
-
-
-def _nrv_trace(results_nrv, key: str, row_index: int, t_dst_ms: np.ndarray) -> np.ndarray:
-    t_nrv = np.asarray(results_nrv["t"], dtype=float).ravel()
-    x_nrv = np.asarray(results_nrv["x_rec"], dtype=float)
-    matrix = _normalize_nrv_matrix(results_nrv[key], t_nrv, x_nrv)
-    return np.interp(t_dst_ms, t_nrv, matrix[row_index])
 
 
 def _resolve_nrv_key(spec: IntracellularSpec, key: str) -> str:
@@ -205,12 +141,12 @@ def _plot_intracellular_report(
 ) -> Path:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     t_as = np.asarray(res.t, dtype=float)
-    as_x = axonscope_x_um(axon)
+    as_x = axonfleet_x_um(axon)
     vm_local_as = np.asarray(res.Vm, dtype=float)[:, sample_as_idx]
 
     fig, axs = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
 
-    axs[0, 0].plot(t_as, vm_local_as, lw=2.0, zorder=2, label="AxonScope")
+    axs[0, 0].plot(t_as, vm_local_as, lw=2.0, zorder=2, label="AxonFleet")
     axs[0, 0].plot(t_as, vm_local_nrv, "--", lw=2.2, zorder=4, label="NRV")
     axs[0, 0].set_title(f"{spec.name} local Vm")
     axs[0, 0].set_xlabel("Time [ms]")
@@ -225,7 +161,7 @@ def _plot_intracellular_report(
         extent=[float(t_as[0]), float(t_as[-1]), float(as_x[0]), float(as_x[-1])],
         cmap="viridis",
     )
-    axs[0, 1].set_title("AxonScope heatmap")
+    axs[0, 1].set_title("AxonFleet heatmap")
     axs[0, 1].set_xlabel("Time [ms]")
     axs[0, 1].set_ylabel("Position [um]")
     fig.colorbar(im_as, ax=axs[0, 1], label="Vm [mV]")
@@ -237,7 +173,7 @@ def _plot_intracellular_report(
         extent=[float(t_as[0]), float(t_as[-1]), float(as_x[0]), float(as_x[-1])],
         cmap="viridis",
     )
-    axs[1, 0].set_title("NRV heatmap (aligned on AxonScope x/time)")
+    axs[1, 0].set_title("NRV heatmap (aligned on AxonFleet x/time)")
     axs[1, 0].set_xlabel("Time [ms]")
     axs[1, 0].set_ylabel("Position [um]")
     fig.colorbar(im_nrv, ax=axs[1, 0], label="Vm [mV]")
@@ -327,9 +263,9 @@ def _plot_intracellular_report(
 
 
 def _run_intracellular_spec(spec: IntracellularSpec) -> None:
-    axon = spec.axonscope_factory()
+    axon = spec.axonfleet_factory()
     record_observables = bool(spec.current_pairs or spec.gate_pairs or spec.state_pairs)
-    res = run_axonscope_simulation(
+    res = run_axonfleet_simulation(
         axon,
         tsim=spec.tsim_ms,
         dt=spec.dt_ms,
@@ -340,40 +276,42 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
     failures: list[str] = []
 
     axon_nrv = spec.nrv_factory(axon, spec.dt_ms)
-    _enable_nrv_recordings(axon_nrv)
+    enable_nrv_recordings(axon_nrv)
     results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)
 
     t_as = np.asarray(res.t, dtype=float)
     vm_as_matrix, as_x_um, _ = _axonspace_vm_matrix(axon, res, spec.matrix_mode)
     vm_nrv_matrix, x_nrv, t_nrv = _nrv_vm_matrix(results_nrv)
-    _, vm_nrv_matrix_aligned, _ = _align_rows_to_target_x(x_nrv, vm_nrv_matrix, as_x_um)
-    vm_nrv_interp = _interp_rows(vm_nrv_matrix_aligned, t_nrv, t_as)
+    _, vm_nrv_matrix_aligned, _ = align_rows_to_target_x(x_nrv, vm_nrv_matrix, as_x_um)
+    vm_nrv_interp = interp_rows(vm_nrv_matrix_aligned, t_nrv, t_as)
     sample_position_um = getattr(axon, "comparison_sample_position_um", None)
-    sample_as_idx, sample_nrv_idx = _sample_indices(as_x_um, x_nrv, sample_position_um)
+    sample_as_idx, sample_nrv_idx = sample_indices_from_position(
+        as_x_um, x_nrv, sample_position_um
+    )
 
     vm_local_as = np.asarray(res.Vm, dtype=float)[:, sample_as_idx]
     vm_local_nrv = np.interp(t_as, t_nrv, vm_nrv_matrix_aligned[sample_as_idx])
-    vm_rmse, _, _ = _trace_metrics(vm_local_nrv, vm_local_as)
+    vm_rmse, _, _ = trace_metrics(vm_local_nrv, vm_local_as)
     peak_diff = float(abs(float(vm_local_as.max()) - float(vm_local_nrv.max())))
 
     metrics_lines = [
         f"Vm RMSE      : {vm_rmse:8.4f} mV",
         f"Vm peak diff : {peak_diff:8.4f} mV",
-        "Currents: AxonScope traces scaled by 1e-3 to match NRV current units",
+        "Currents: AxonFleet traces scaled by 1e-3 to match NRV current units",
     ]
 
     current_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.current_pairs:
-        as_trace = AXONSCOPE_TO_NRV_CURRENT_SCALE * _recorded_trace(
+        as_trace = AXONFLEET_TO_NRV_CURRENT_SCALE * _recorded_trace(
             res, "currents", as_name, sample_as_idx
         )
-        nrv_trace = _nrv_trace(
+        nrv_trace = interpolate_nrv_trace(
             results_nrv,
             _resolve_nrv_key(spec, nrv_name),
             sample_nrv_idx,
             t_as,
         )
-        rmse, max_abs, q99_abs = _trace_metrics(nrv_trace, as_trace)
+        rmse, max_abs, q99_abs = trace_metrics(nrv_trace, as_trace)
         best_lag, best_lag_rmse = _best_integer_lag(nrv_trace, as_trace)
         metrics_lines.append(
             f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f} "
@@ -392,8 +330,10 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
     gate_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.gate_pairs:
         as_trace = _recorded_trace(res, "gates", as_name, sample_as_idx)
-        nrv_trace = _nrv_trace(results_nrv, _resolve_nrv_key(spec, nrv_name), sample_nrv_idx, t_as)
-        rmse, max_abs, q99_abs = _trace_metrics(nrv_trace, as_trace)
+        nrv_trace = interpolate_nrv_trace(
+            results_nrv, _resolve_nrv_key(spec, nrv_name), sample_nrv_idx, t_as
+        )
+        rmse, max_abs, q99_abs = trace_metrics(nrv_trace, as_trace)
         metrics_lines.append(
             f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f}"
         )
@@ -410,8 +350,10 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
     state_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.state_pairs:
         as_trace = _recorded_trace(res, "states", as_name, sample_as_idx)
-        nrv_trace = _nrv_trace(results_nrv, _resolve_nrv_key(spec, nrv_name), sample_nrv_idx, t_as)
-        rmse, max_abs, q99_abs = _trace_metrics(nrv_trace, as_trace)
+        nrv_trace = interpolate_nrv_trace(
+            results_nrv, _resolve_nrv_key(spec, nrv_name), sample_nrv_idx, t_as
+        )
+        rmse, max_abs, q99_abs = trace_metrics(nrv_trace, as_trace)
         metrics_lines.append(
             f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f}"
         )
@@ -615,7 +557,7 @@ def _make_schild97_nrv(_, _dt_ms: float):
 def _make_mrg_axon():
     ax = MRG(diameter=10.0 * um, nodes=7)
     stim_node = int(ax.node_indices.shape[0] // 2)
-    stim_pos_um = float(axonscope_x_um(ax)[int(ax.node_indices[stim_node])])
+    stim_pos_um = float(axonfleet_x_um(ax)[int(ax.node_indices[stim_node])])
     sim = AxonInstance(ax)
     sim.add_current_clamp(position=stim_pos_um * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=2.0))
     sim.comparison_sample_position_um = stim_pos_um
@@ -644,7 +586,7 @@ def _make_mrg_nrv(axon_as, dt_ms: float):
 def _make_gaines_axon(axon_class):
     ax = axon_class(diameter=10.0 * um, nodes=7)
     stim_node = int(ax.node_indices.shape[0] // 2)
-    stim_pos_um = float(axonscope_x_um(ax)[int(ax.node_indices[stim_node])])
+    stim_pos_um = float(axonfleet_x_um(ax)[int(ax.node_indices[stim_node])])
     sim = AxonInstance(ax)
     sim.add_current_clamp(
         position=stim_pos_um * um,
@@ -692,7 +634,7 @@ def _make_gaines_sensory_nrv(axon_as, dt_ms: float):
 SPECS = [
     IntracellularSpec(
         name="hh",
-        axonscope_factory=_make_hh_axon,
+        axonfleet_factory=_make_hh_axon,
         nrv_factory=_make_hh_nrv,
         tsim_ms=10.0,
         dt_ms=0.001,
@@ -711,7 +653,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="rattay",
-        axonscope_factory=_make_rattay_axon,
+        axonfleet_factory=_make_rattay_axon,
         nrv_factory=_make_rattay_nrv,
         tsim_ms=15.0,
         dt_ms=0.01,
@@ -730,7 +672,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="sundt",
-        axonscope_factory=_make_sundt_axon,
+        axonfleet_factory=_make_sundt_axon,
         nrv_factory=_make_sundt_nrv,
         tsim_ms=10.0,
         dt_ms=0.001,
@@ -749,7 +691,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="tigerholm",
-        axonscope_factory=_make_tigerholm_axon,
+        axonfleet_factory=_make_tigerholm_axon,
         nrv_factory=_make_tigerholm_nrv,
         tsim_ms=30.0,
         dt_ms=0.025,
@@ -788,7 +730,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="schild94",
-        axonscope_factory=_make_schild94_axon,
+        axonfleet_factory=_make_schild94_axon,
         nrv_factory=_make_schild94_nrv,
         tsim_ms=20.0,
         dt_ms=0.01,
@@ -828,7 +770,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="schild97",
-        axonscope_factory=_make_schild97_axon,
+        axonfleet_factory=_make_schild97_axon,
         nrv_factory=_make_schild97_nrv,
         tsim_ms=20.0,
         dt_ms=0.01,
@@ -862,7 +804,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="mrg",
-        axonscope_factory=_make_mrg_axon,
+        axonfleet_factory=_make_mrg_axon,
         nrv_factory=_make_mrg_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -882,7 +824,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="gaines_motor",
-        axonscope_factory=_make_gaines_motor_axon,
+        axonfleet_factory=_make_gaines_motor_axon,
         nrv_factory=_make_gaines_motor_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
@@ -902,7 +844,7 @@ SPECS = [
     ),
     IntracellularSpec(
         name="gaines_sensory",
-        axonscope_factory=_make_gaines_sensory_axon,
+        axonfleet_factory=_make_gaines_sensory_axon,
         nrv_factory=_make_gaines_sensory_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,

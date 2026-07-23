@@ -1,25 +1,31 @@
 from __future__ import annotations
 
-import axonscope as axs
+import axonfleet as axs
+from axonfleet.membranes.explain import (
+    MembraneComponentExplanation,
+    MembraneMechanismExplanation,
+    MembraneModelExplanation,
+    MembraneRecordingOutputExplanation,
+)
 
 
 def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path, monkeypatch):
-    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.Passive()
 
     report = model.explain()
 
-    assert isinstance(report, axs.membranes.MembraneModelExplanation)
+    assert isinstance(report, MembraneModelExplanation)
     assert report.model_kind == "passive"
     assert report.components == (
-        axs.membranes.MembraneComponentExplanation(
+        MembraneComponentExplanation(
             label="passive",
             model_kind="passive",
         ),
     )
     assert isinstance(
         report.recording_outputs,
-        axs.membranes.MembraneRecordingOutputExplanation,
+        MembraneRecordingOutputExplanation,
     )
     assert report.recording_outputs.currents == ("I_l",)
     assert report.recording_outputs.conductances == ("g_l",)
@@ -50,7 +56,7 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
     assert source.targets[0].output_names == ("I_l", "g_l")
 
     text = report.format()
-    assert "AxonScope membrane model explanation" in text
+    assert "AxonFleet membrane model explanation" in text
     assert "model=passive" in text
     assert "components=(passive:passive)" in text
     assert "recording_outputs=" in text
@@ -64,7 +70,7 @@ def test_membrane_explain_reports_composite_labels_and_recording_outputs(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.Composite(
         {
             "rattay": axs.membranes.RattayAberham(),
@@ -76,11 +82,11 @@ def test_membrane_explain_reports_composite_labels_and_recording_outputs(
 
     assert report.model_kind == "composite"
     assert report.components == (
-        axs.membranes.MembraneComponentExplanation(
+        MembraneComponentExplanation(
             label="rattay",
             model_kind="rattay_aberham",
         ),
-        axs.membranes.MembraneComponentExplanation(
+        MembraneComponentExplanation(
             label="extra_leak",
             model_kind="passive",
         ),
@@ -108,7 +114,7 @@ def test_membrane_explain_reuses_generated_cache_and_reports_model_step_pruning(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.HodgkinHuxley()
     model.explain()
 
@@ -150,7 +156,7 @@ def test_membrane_explain_reuses_generated_cache_and_reports_model_step_pruning(
 
 
 def test_membrane_explain_reports_mechanism_boundaries(tmp_path, monkeypatch):
-    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.Sundt()
 
     report = model.explain()
@@ -160,7 +166,7 @@ def test_membrane_explain_reports_mechanism_boundaries(tmp_path, monkeypatch):
         "na_hh",
         "borg_kdr",
     ]
-    assert isinstance(source.mechanisms[0], axs.membranes.MembraneMechanismExplanation)
+    assert isinstance(source.mechanisms[0], MembraneMechanismExplanation)
 
     na_hh = source.mechanisms[0]
     assert na_hh.function_name == "na_hh_rates"
@@ -192,7 +198,7 @@ def test_membrane_explain_reports_mechanism_boundaries(tmp_path, monkeypatch):
 
 
 def test_membrane_explain_reports_stateful_step_program(tmp_path, monkeypatch):
-    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    monkeypatch.setenv("AXONFLEET_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.Schild94(diameter=0.8 * axs.um)
 
     report = model.explain()

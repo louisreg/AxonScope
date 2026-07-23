@@ -4,7 +4,7 @@ Pool simulation runs through the executable `AxonSimulation` root object.
 `AxonPopulation` is the explicit public container for cohorts:
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 sim_a = axs.AxonInstance(axon_a)
 sim_b = axs.AxonInstance(axon_b)
@@ -63,7 +63,7 @@ population row. The view is the public one-axon result surface.
 
 ## Spatial Position
 
-AxonScope core uses the intrinsic one-dimensional coordinate:
+AxonFleet core uses the intrinsic one-dimensional coordinate:
 
 ```text
 s = 0 ... axon length
@@ -126,7 +126,7 @@ position on the axon instance.
 private dispatch results instead of public result containers:
 
 ```python
-from axonscope.dispatcher import run_pool
+from axonfleet.dispatcher import run_pool
 
 dispatch_results = run_pool(
     population,
@@ -142,13 +142,12 @@ Solver-level knobs are passed as solver options. Batch memory/recording knobs
 are passed separately as batch options:
 
 ```python
-import axonscope as axs
+import axonfleet as axs
 
 dispatch_results = run_pool(
     [sim_a, sim_b],
     tsim_ms=5.0,
     dt_ms=0.01,
-    solver_options=axs.SolverOptions(),
     batch_options=axs.BatchOptions(time_chunk_steps=50),
 )
 ```
@@ -179,7 +178,7 @@ A compatible non-padded single-cable batch group currently means:
 
 - same cable formulation (`single-cable` or `double-cable`);
 - same membrane layout/signature;
-- same `n_compartments`, `Vinit`, `Veinit`, and temperature.
+- same `n_compartments`, initial membrane voltage, and temperature.
 
 When local cable/periaxonal arrays are identical the method is reported as
 `batch-single-cable` or `batch-double-cable`. When those arrays vary but the
@@ -273,32 +272,35 @@ Current files:
 
 - `simulation.py`: public `AxonSimulation` orchestration;
 - `dispatcher/plan.py`: normalization, compatibility signatures, and groups;
-- `dispatcher/execution.py`: scalar/batch execution and `run_pool`;
-- `dispatcher/inspection.py`: text and Matplotlib inspection helpers for
-  dispatch plans;
-- `preparation/runtime_batches.py`: host-side builders for batched solver inputs
-  from intracellular contexts, extracellular stimulations, sampled footprints,
-  and intrinsic positions.
-- `solvers/options.py`: solver-owned numerical options, batch execution
-  options, and batch Vm retention policies.
+- `dispatcher/execution.py`: batch scheduling and execution;
+- `inspection/`: public simulation and dispatch-plan inspection records and
+  views;
+- `preparation/`: host-side axon, membrane, cohort, and stimulation row
+  materialization;
+- `runtime/execution.py`: the sole public-orchestration boundary into the JAX
+  backend;
+- `solvers/options.py`: batch execution and Vm-retention contracts.
 
 Current package layout:
 
 ```text
 dispatcher/
-  __init__.py        dispatch surface: run_pool, build/print/plot dispatch plans
-  plan.py           normalization and grouping
-  execution.py      scalar/batch execution and public run_pool entry point
-  inspection.py     print/plot helpers for dispatch plans
+  plan.py             normalization and grouping
+  execution.py        batch scheduling and execution
 
 preparation/
-  runtime_batches.py  host-side runtime-batch row assembly
+  axon_rows.py         host numerical axon rows
+  membrane_rows.py     membrane row plans
+  stimulation_rows.py enabled extracellular rows
+  cohort.py            aligned prepared group contract
+
+runtime/
+  execution.py        backend-neutral orchestration facade
 
 solvers/
-  options.py        solver and batch execution options
+  options.py          batch execution and Vm retention
 ```
 
-Use `axonscope.dispatcher` for dispatch. Keep direct imports from
-`axonscope.preparation.runtime_batches` inside internal tests, benchmark tools,
-or deliberate runtime-assembly debugging so the public dispatch surface stays
-small.
+Users should enter through `AxonSimulation.run()`, `.estimate()`, and
+`.inspect()`. Dispatcher, preparation, and concrete runtime modules are
+internal implementation boundaries, not parallel public execution surfaces.

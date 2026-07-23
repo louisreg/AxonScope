@@ -4,22 +4,22 @@ from typing import Iterable, Literal
 
 import numpy as np
 
-import axonscope as axs
-from axonscope.axons.flattened import flatten_layout
+import axonfleet as axs
+from axonfleet.axons.flattened import flatten_layout
 
 
-AXONSCOPE_TO_NRV_CURRENT_SCALE = 1e-3
-AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE = 1e-3
+AXONFLEET_TO_NRV_CURRENT_SCALE = 1e-3
+AXONFLEET_TO_NRV_CONDUCTANCE_SCALE = 1e-3
 
 
-def run_axonscope_simulation(
+def run_axonfleet_simulation(
     axon,
     *,
     tsim: float,
     dt: float,
     record_observables: bool = False,
 ):
-    """Run one AxonScope axon/instance through the public simulation path."""
+    """Run one AxonFleet axon/instance through the public simulation path."""
 
     recording = None
     if record_observables:
@@ -38,20 +38,20 @@ def run_axonscope_simulation(
     ).run().single
 
 
-def axonscope_x_um(axon) -> np.ndarray:
-    """Return AxonScope compartment-center positions from the descriptive layout."""
+def axonfleet_x_um(axon) -> np.ndarray:
+    """Return AxonFleet compartment-center positions from the descriptive layout."""
 
     return np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float)
 
 
-def axonscope_compartment_lengths_um(axon) -> np.ndarray:
-    """Return AxonScope compartment control-volume lengths from the layout."""
+def axonfleet_compartment_lengths_um(axon) -> np.ndarray:
+    """Return AxonFleet compartment control-volume lengths from the layout."""
 
     return np.asarray(axon.layout.compartment_length_values(unit="micrometer"), dtype=float)
 
 
-def axonscope_section_names(axon) -> np.ndarray:
-    """Return one section label per AxonScope compartment."""
+def axonfleet_section_names(axon) -> np.ndarray:
+    """Return one section label per AxonFleet compartment."""
 
     return np.asarray(flatten_layout(axon.layout).section_names, dtype=object)
 

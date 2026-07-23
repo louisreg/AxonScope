@@ -3,7 +3,7 @@
 Run:
     python examples/advanced/axon_models/05_custom_membrane_authoring.py
 
-This example covers the public P7 membrane-authoring contract:
+This example covers the public membrane-authoring contract:
 
 - a passive leak class with named intermediate equations;
 - a small gated HH-style class with a mechanism section;
@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 
-import axonscope as axs
-from axonscope.membranes.types import (
+import axonfleet as axs
+from axonfleet.membranes.types import (
     ConductanceDensity,
     CurrentDensity,
     Dimensionless,

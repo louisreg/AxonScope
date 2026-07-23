@@ -1,7 +1,7 @@
 # Examples
 
-Examples are the executable learning path for AxonScope. They use public
-top-level APIs (`import axonscope as axs`) and Pint-style quantities such as
+Examples are the executable learning path for AxonFleet. They use public
+top-level APIs (`import axonfleet as axs`) and Pint-style quantities such as
 `500 * axs.um`. Backend, solver, benchmark, and profiling internals stay out of
 public examples.
 
@@ -26,7 +26,7 @@ one visible result.
 
 ## Advanced
 
-`examples/advanced/` is organized by AxonScope subsystem. These scripts are
+`examples/advanced/` is organized by AxonFleet subsystem. These scripts are
 still runnable examples, but they explain the moving parts more explicitly.
 
 ### Simulation Workflow
@@ -78,8 +78,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   policies, `RecordingPlan` values, and typed `axs.signals` descriptors.
 - `recording_analysis/02_position_selectors.py`: select analysis targets
   with `axs.positions`.
-- `recording_analysis/03_activation_criterion.py`: evaluate post-hoc activation
-  criteria from recorded Vm.
+- `recording_analysis/03_activation_detection.py`: detect compact post-hoc
+  activation events from recorded Vm.
 - `recording_analysis/04_analysis_layer.py`: use structured post-hoc analyses,
   statuses, reports, and population denominators.
 - `recording_analysis/05_dense_recording.py`: record dense gates,
@@ -112,34 +112,33 @@ still runnable examples, but they explain the moving parts more explicitly.
 
 - `runtime/01_runtime_policy.py`: set JAX/CPU/precision through
   `ExecutionPolicy`.
-- `runtime/02_preparation_signatures.py`: inspect preparation signatures for
-  reusable inputs.
-- `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
+- `runtime/02_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
   preparation, lowering, kernel route, and result assembly without launching
   kernels.
-- `runtime/04_solver_policy.py`: choose typed single-cable/double-cable solver
+- `runtime/03_solver_policy.py`: choose typed single-cable/double-cable solver
   policies and inspect the resolved double-cable backend route.
+- `runtime/04_cache_policy.py`: inspect deterministic generated/runtime cache
+  sections, generate one requested membrane target, and clean known artifacts.
 
 ## With NRV
 
 `examples/with_nrv/` is for integration with NRV, where NRV owns complex nerve
-geometry/fiber placement and AxonScope owns axon dynamics. Reusable handoff
-logic lives in `axonscope.integrations.nrv`; examples should use the two public
+geometry/fiber placement and AxonFleet owns axon dynamics. Reusable handoff
+logic lives in `axonfleet.integrations.nrv`; examples should use the two public
 bridges, `population_from_nrv(...)` then `footprints_from_nrv(...)`, instead of
 re-implementing fiber-table extraction, LIFE/FEM footprint sampling, or NRV
 recruitment decoding. NRV geometry, population, electrode, and FEM setup remain
 explicit NRV code in the example or benchmark, not package integration code.
 
 - `01_synthetic_fascicle_geometry.py`: build the synthetic two-fascicle NRV
-  tutorial geometry, sample NRV's LIFE/FEM footprint into AxonScope stimulation
-  objects, run an AxonScope recruitment sweep, and plot recruitment plus
+  tutorial geometry, sample NRV's LIFE/FEM footprint into AxonFleet stimulation
+  objects, run an AxonFleet recruitment sweep, and plot recruitment plus
   activated fibers on the nerve cross-section.
 - `02_realistic_fascicle_geometry.py`: build one realistic NRV nerve from the
-  bundled histology contour image with `cv2`, then run the same NRV-to-AxonScope
+  bundled histology contour image with `cv2`, then run the same NRV-to-AxonFleet
   footprint handoff and recruitment workflow as the synthetic example.
-  NRV validation lives under `tests/nrv`; future NRV timing comparisons belong
-  in `benchmark/baselines/` and the P11 curve scripts once the adapter contract
-  is defined.
+  NRV validation lives under `tests/nrv`; executable performance gates belong
+  in `benchmark/examples/with_nrv_examples.py`.
 
 ## Tutorials
 
@@ -156,8 +155,7 @@ Reusable timing, memory, profiling, and reproducibility campaigns live under
 
 - `benchmark/README.md`: supported benchmark surface and retained commands.
 - `benchmark/run.py`: shared launcher for benchmark scripts and presets.
-- `benchmark/curves/threshold_curves.py`: activation/block threshold case
+- `benchmark/curves/threshold_curves.py`: activation-threshold cases
   matrix.
 - `benchmark/curves/recruitment_curves.py`: recruitment case matrix.
 - `benchmark/analysis/trace_summary.py`: event/profile artifact summaries.
-- `benchmark/legacy/pre_p11/`: archived historical runners and notebooks.

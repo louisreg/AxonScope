@@ -1,13 +1,13 @@
-# AxonScope TODO
+# AxonFleet TODO
 
-Living execution plan for AxonScope. `GUIDELINES.md` owns architecture and
+Living execution plan for AxonFleet. `GUIDELINES.md` owns architecture and
 product boundaries; source, tests, runnable examples, and fresh validation or
 benchmark artifacts own current behavior. Completed implementation detail lives
 in the phase audits and `benchmark/README.md`, not in this checklist.
 
 ## Snapshot
 
-Updated on 2026-07-22 after closing P18 and consolidating the remaining roadmap.
+Updated on 2026-07-23 during the P19 source and public-surface audit.
 
 - P7, P11, P12, the VmRaster part of P13, and P14-P18 are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; CUDA
@@ -18,12 +18,12 @@ Updated on 2026-07-22 after closing P18 and consolidating the remaining roadmap.
 - Compact activation, latency, spike-count, bounded spike-time, and VmRaster
   observers are available. Dense recording remains a separate memory/performance
   concern.
-- P19 pre-v1 convergence is the only active phase. P20 and later work is future
-  architecture or product expansion.
+- P19A and P19B are closed. P19C is intentionally deferred; P20 and later work
+  remains future architecture or product expansion.
 
 ## Non-Negotiables
 
-- AxonScope is pre-release with one active user. Prefer direct convergence over
+- AxonFleet is pre-release with one active user. Prefer direct convergence over
   compatibility shims, deprecated wrappers, or parallel old/new paths.
 - Keep one concept, one public name, one execution path, and one canonical
   public result model.
@@ -31,10 +31,10 @@ Updated on 2026-07-22 after closing P18 and consolidating the remaining roadmap.
   prototypes may coexist temporarily; remove rejected or replaced variants.
 - Discuss changes to public results, serialization, progress output, or the
   canonical workflow before implementing them.
-- Public orchestration enters JAX through `axonscope.runtime.execution`.
+- Public orchestration enters JAX through `axonfleet.runtime.execution`.
 - Public examples must use public APIs, never runtime or solver internals.
 - External packages own nerve geometry, trajectories, world coordinates,
-  electrode CAD, and FEM solves. AxonScope owns intrinsic axon coordinates,
+  electrode CAD, and FEM solves. AxonFleet owns intrinsic axon coordinates,
   sampled-footprint stimulation, cable/membrane execution, recording, and
   analysis.
 - Document every public feature in a runnable example or remove it.
@@ -45,33 +45,179 @@ Updated on 2026-07-22 after closing P18 and consolidating the remaining roadmap.
 
 ### P19A - Source And Public-Surface Convergence
 
-- [ ] Build one Graphify- and `vulture`-assisted inventory of every Python
+- [x] Build one Graphify- and `vulture`-assisted inventory of every Python
   module, public export, function, and type. Record production, example,
-  benchmark, and test-only call sites before deleting anything.
-- [ ] Remove code used only by tests, legacy wrappers, replaced slow routes,
-  duplicate implementations, and public names without runnable examples. Do
-  not preserve compatibility aliases or hidden fallbacks.
-- [ ] Reorganize `src/`, especially modules still at package root, after dead
+  benchmark, and test-only call sites before deleting anything. Track the
+  exhaustive decisions in
+  `docs/architecture/p19_repository_audit_checklist.md`.
+- [x] Audit concepts as well as symbols: identify responsibilities implemented
+  more than once, historical variants with only marginal remaining use, and
+  old abstractions that survive only through a handful of internal call sites.
+  Converge each retained concept on one owner and one execution path.
+- [x] Simplify and strengthen contracts while converging the source tree. Audit
+  every intermediate record, payload, plan, conversion, and runtime boundary;
+  merge equivalent representations, rewrite weak contracts where needed, and
+  minimize orchestration layers between the public workflow and solver kernels.
+- [x] Complete the first convergence slice: remove orphan compiler/dispatcher
+  wrappers and the duplicate utility `vtrap`, retain only host-side diffusion
+  construction and node-first double-cable assembly, share dispatch result
+  validation across schedulers, and delete the duplicate archived test wrappers.
+- [x] Complete the second convergence slice: remove the historical pre-P11
+  benchmark source archive and unused protocol facade; shrink the package root
+  to example-backed workflow names; remove transverse world coordinates and
+  derivable row facts from prepared runtime cohorts; and delete the no-op
+  execution-context options adapter.
+- [x] Complete the third convergence slice: remove the standalone test-only
+  analysis observer and redundant analysis aliases; audit every
+  `AxonInstance` method; remove unused mutation/evaluation adapters; make
+  `Section.periaxonal` the only cable-layer owner; and converge runtime input on
+  one optional `ExtracellularStimulation` containing multiple drives.
+- [x] Complete the fourth convergence slice: remove write-only analysis
+  capability fields and ignored activation options; delete the duplicate
+  preparation-signature API; move benchmark environment metadata to its
+  runtime owner; collapse benchmark instrumentation onto one public facade;
+  and remove unused profiler and global JAX-settings paths.
+- [x] Remove the empty `SolverOptions` contract and its no-op cache-key and
+  dispatcher/runtime plumbing. Solver choices belong to typed
+  `ExecutionPolicy`; only add a future numerical-options contract when it has
+  a real, example-backed option.
+- [x] Converge activation onto one public definition: `Activation.detect()`
+  returns a compact per-axon event, while `Activation.evaluate()` returns the
+  structured analysis result. Remove `ActivationCriterion` and all protocol
+  conversion paths instead of preserving two equivalent configurations.
+- [x] Converge direct conduction-velocity calculation onto
+  `ConductionVelocity.detect()` and structured evaluation onto
+  `ConductionVelocity.evaluate()`. Keep `rasterize()` as the distinct
+  multi-spike detector and use `result.recorded_axis` for position ownership.
+- [x] Converge dispatcher, inspection, and estimation onto the actual
+  batch-only contract. Remove the constant route predicate, unreachable scalar
+  estimates, ignored observable-routing flag, redundant route metadata, and
+  internal dispatcher facade; retain observer compatibility as its own check.
+- [x] Converge threshold protocols on batched `find_threshold()`. Remove the
+  sequential factory-based `find_activation_threshold()`, its standalone
+  history/result/view family, and aliases that duplicated `Activation` and
+  `PoolUpdate`.
+- [x] Simplify result assembly and pool results: inline the sole post-hoc row
+  adapter, remove duplicate `Any` typing modules, make `OutputPlan` the actual
+  assembly contract, converge row selection on sequence indexing, and keep the
+  recording manifest focused on requested and available public signals.
+- [x] Converge stimulation on its executable contracts: remove the unsupported
+  generic intracellular base, collection add/remove adapters, and unused
+  drive/footprint aliases; retain one clamp type, one sampled multi-drive
+  stimulation, and the full waveform construction/composition surface now
+  demonstrated in `basic/02`.
+- [x] Finish the analysis audit: retain one definition/event/result route per
+  scientific concept and the distinct multi-spike rasterizer, while making
+  missing-input exceptions, requirement records, typing protocols, and the
+  raw activation detector private implementation details.
+- [x] Converge descriptive axons on `Section -> Layout -> Axon`: remove
+  flattened/runtime materialization and raw formulation helpers from the
+  public facade, make `MRGLikeDoubleCableTemplate` the advanced MRG
+  construction path, and remove duplicate layout, compartment, and node
+  accessors while preserving every example-backed model workflow.
+- [x] Converge the NRV integration on its example-backed bridge: external NRV
+  objects produce one intrinsic AxonFleet population and sampled electrode
+  footprints, which then produce the canonical stimulated population. Remove
+  test-only slicing, concatenation, forwarding views, activation-comparison
+  utilities, and low-level bridge helpers from the public surface.
+- [x] Remove the reserved but non-executable `axs.runtime.numpy` path and its
+  public target-construction vocabulary. Keep NumPy host materialization and
+  membrane reference execution internal; expose a NumPy/SciPy runtime target
+  only after the deferred backend supports the complete public lifecycle.
+- [x] Converge the runtime-neutral recording and benchmark boundaries: lower a
+  public recording through one function, retain group-aware padding as a
+  separate runtime concern, and keep benchmark session state, array metadata,
+  synchronization, and internal report records out of the public facade.
+- [x] Converge the membrane authoring facade on models, equation/state
+  declarations, composition/layout, and inspection commands. Remove the
+  redundant built-ins facade, internal report-record exports, and the
+  public-looking descriptor conversion while preserving the generic `section`
+  extension point and compiler-supported equation vocabulary.
+- [x] Audit the internal model compiler end to end. Retain one scalar equation
+  graph for composition, validation, reference execution, hashing, and
+  NumPy/JAX/Triton generation; remove its import facade, unused function/local
+  schema, and unexercised symbolic shapes; reject stale serialized schemas and
+  invalidate generated caches explicitly.
+- [x] Converge membrane execution on generated artifacts: remove the
+  test-only JAX Model IR interpreter and `JaxMembraneProgram.from_model_ir()`,
+  make generated JAX/NumPy modules the only runtime path, and fix generic
+  named-current dependencies in generated state-update functions.
+- [x] Converge JAX stimulation input on one batch-payload route: remove the
+  scalar `JaxStimulus` compiler, callable intracellular/extracellular wrappers,
+  and stimulation-bearing `SolverRuntime`; prepare only static solver state and
+  require kernels to receive explicit lowered inputs and drive-state metadata.
+- [x] Remove the unvalidated double-cable shape-bucketing experiment and its
+  duplicate public/kernel group plumbing. Retain one dispatch group through
+  cohort preparation, lowering, memory estimation, and kernel execution.
+- [x] Converge compact extracellular kernel inputs: precompute single-cable
+  forcing footprints once during host lowering, remove the duplicate JAX
+  computation/cache, and reject unsupported double-cable factorized payloads
+  instead of silently materializing a second dense route inside the kernel.
+- [x] Converge double-cable execution after policy resolution: GPU physical
+  steps and JIT scans enter the selected tiled-Thomas route directly, while
+  CPU scans call the sole scalar block-Thomas implementation directly. Remove
+  test-only solver wrappers, repeated kernel validation, and private facades.
+- [x] Converge generated membrane runtime contracts: cache each immutable typed
+  contract on its generated module, retain only runtime-relevant typed
+  metadata, remove tautological generated-path flags and test-only helpers,
+  and narrow row-indexed backends to the operations they execute.
+- [x] Converge JAX solver policy on choices that affect execution: remove the
+  false public single-cable selector and its obsolete benchmark campaign,
+  retain one platform-selected single-cable route, and require resolved engine
+  descriptors to contain concrete solver routes without redundant permission
+  bits or test-only cache-reset APIs.
+- [x] Audit JAX recording end to end: retain one cached cohort-to-observer-plan
+  lowering, bounded activation/latency/spike states, packed VmRaster retention,
+  and one kernel-result finalization route. Move recording-mode selection to
+  group orchestration and remove one-call trimming and internal export facades.
+- [x] Close the JAX input audit: retain runtime-neutral compact payloads and
+  planning plus one JAX lowering/materialization path. Make each cable
+  `RuntimeInputContract` the sole owner of extracellular capabilities instead
+  of copying them into every lowered payload, and remove internal export
+  facades without changing dense, sparse, factorized, or zero routes.
+- [x] Audit JAX benchmark support: retain distinct hot-path metadata, device
+  memory snapshots, and profiler/inspection adapters behind
+  `runtime.execution`. Confirm their production benchmark and estimate
+  consumers, and remove package/module export facades without weakening
+  benchmark evidence.
+- [x] Close the JAX runtime audit: retain one enqueue/finalize group runner and
+  one single-/double-cable kernel route. Make `DispatchGroup` the sole owner of
+  diagnostic method labels, derive preparation and initial-previous behavior
+  from group mode, remove dead double-cable state and internal facades, and
+  narrow the explicit diffusion helper to the coefficients it uses.
+- [x] Close the source utility audit: retain one Pint-compatible public unit
+  boundary, the membrane source-unit vocabulary, shared value invariants, and
+  progress reporting. Remove unused compatibility aliases, dead conversion
+  wrappers, and internal export facades.
+- [x] Remove code used only by tests, legacy wrappers, replaced slow routes,
+  duplicate implementations, public names without runnable examples, and
+  unused directories, documents, generated artifacts, or miscellaneous files.
+  Do not preserve compatibility aliases or hidden fallbacks.
+- [x] Reorganize `src/`, especially modules still at package root, after dead
   code is removed. Preserve ownership boundaries and avoid moves that only
   exchange one flat namespace for another.
-- [ ] Verify that public simulation, inspection, estimates, protocols,
+- [x] Verify that public simulation, inspection, estimates, protocols,
   recording, results, and analyses each have one canonical contract and route
-  through `axonscope.runtime.execution` where runtime work is required.
-- [ ] Run a final whole-package Graphify audit after cleanup and confirm that
+  through `axonfleet.runtime.execution` where runtime work is required.
+- [x] Run a final whole-package Graphify audit after cleanup and confirm that
   no duplicate public concepts, model-specific solver branches, or stale
   runtime paths remain.
 
 ### P19B - Packaging, Caches, And Repository Hygiene
 
-- [ ] Clean `pyproject.toml`: remove obsolete extras and expose explicit,
+- [x] Rename the project to `AxonFleet` across the distribution, Python import
+  namespace, source tree, docs/examples, metadata, cache/artifact identifiers,
+  benchmark tooling, and repository-facing text. Make one direct pre-release
+  cutover without an `axonscope` compatibility package or alias.
+- [x] Clean `pyproject.toml`: remove obsolete extras and expose explicit,
   tested optional CUDA/Triton dependencies without making GPU packages a CPU
   installation requirement.
-- [ ] Converge artifact caching globally. Build only requested runtime targets;
+- [x] Converge artifact caching globally. Build only requested runtime targets;
   define first-call versus install-time behavior for built-ins; document
   inspect, clean, disable, invalidation, and retention policies; keep
-  `.axonscope_cache` deterministic. Evaluate additional time-chunk shape
+  `.axonfleet_cache` deterministic. Evaluate additional time-chunk shape
   buckets only if observer padding is numerically inert and benchmarked.
-- [ ] Audit local and remote Git branches, preserve any still-relevant unmerged
+- [x] Audit local and remote Git branches, preserve any still-relevant unmerged
   work, then delete every branch except `main`.
 
 ### P19C - Documentation And Pre-V1 Gate
@@ -80,6 +226,9 @@ Updated on 2026-07-22 after closing P18 and consolidating the remaining roadmap.
   concept documentation from the canonical public surface.
 - [ ] Write the indexed notebook mini-course under `examples/tutorials/` and
   keep it aligned with the runnable Python learning path.
+- [ ] Prepare the CI/CD pipeline for supported Python versions, CPU unit tests,
+  packaging/build checks, documentation, optional GPU validation, release
+  artifacts, and protected publication credentials.
 - [ ] Re-run every basic and advanced example, fast unit checks, relevant NRV
   campaigns, and supported CPU/GPU realistic benchmarks after cleanup. Refresh
   validation counts and retained evidence instead of carrying stale numbers.
@@ -182,16 +331,16 @@ composable study plans, retention, and persisted results above those protocols.
 
 - [ ] Continue NRV hardening only where its package contract is stable. Keep
   geometry construction in `examples/with_nrv` or benchmarks and avoid
-  duplicating `axonscope.integrations.nrv` sampled-footprint behavior.
+  duplicating `axonfleet.integrations.nrv` sampled-footprint behavior.
 - [ ] Implement the CPU/NRV FEM-footprint workflow from
   `ideas/fem_axon_gpu_coupling_design.md` in integration examples/benchmarks,
   not the core solver. Separate FEM solve, first footprint, cached sampling,
-  and AxonScope solve; keep field bases and embedding/projection ownership in
+  and AxonFleet solve; keep field bases and embedding/projection ownership in
   the external geometry/FEM layer. Evaluate GPU FEM only after this path is
   measured.
-- [ ] Add didactic multi-electrode and multi-stimulus examples, including a
-  multipolar cuff over several externally defined fascicles using canonical
-  sampled footprints.
+- [ ] Add multi-electrode and multi-stimulus examples, including a multipolar
+  cuff with several externally defined fascicles using canonical sampled
+  footprints.
 - [ ] Evaluate Apple Metal through `jax-mps` as an optional experimental runtime
   target; require numerical and performance evidence before documenting it as
   supported.
@@ -210,7 +359,7 @@ publication or redistribution-compatible source with explicit provenance.
   demonstrates behavior not represented by Tigerholm or Schild models.
 - [ ] Extend the membrane contract for non-voltage inputs before considering
   sensory K2P channels. Keep receptor-terminal TRP channels outside scope until
-  AxonScope explicitly adopts a validated terminal-transduction product scope.
+  AxonFleet explicitly adopts a validated terminal-transduction product scope.
 - [ ] Add BK/SK, Kv3.4, or Kv4.3 only for a concrete axonal workflow that is not
   represented by the existing `KA` and `KCa` machinery.
 
@@ -220,8 +369,9 @@ This is a future deterministic debugging backend, not a JAX wrapper or the next
 implementation phase. Any non-JAX backend must consume its own generated target
 from the canonical membrane source contract.
 
-- [ ] Reserve `axs.runtime.numpy` until it can use the same
-  `AxonSimulation(...).run()`, `.estimate()`, and `.inspect()` lifecycle.
+- [ ] Add an `axs.runtime.numpy` public target only after it supports the same
+  `AxonSimulation(...).run()`, `.estimate()`, and `.inspect()` lifecycle; do
+  not reserve a non-executable public name beforehand.
 - [ ] Define a small v1 subset: single cable, intracellular current, sampled
   footprints, recording, observers, and selected membranes.
 - [ ] Implement readable tridiagonal Crank-Nicolson with NumPy/SciPy and a
@@ -240,8 +390,5 @@ from the canonical membrane source contract.
 - Validation policy: `docs/validation.md`
 - Examples map: `examples/README.md`
 - P18 model audit: `docs/architecture/p18_nrv_model_audit_2026_07_19.md`
-- P11 closeout: `docs/architecture/p11_closeout_2026_07_12.md`
-- P12 runtime cleanup:
-  `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md`
-- Historical checklist before the 2026-07-12 cleanup:
-  `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
+- P19 repository audit:
+  `docs/architecture/p19_repository_audit_checklist.md`

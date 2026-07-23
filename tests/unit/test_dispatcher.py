@@ -6,62 +6,96 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import axonscope as axs
-import axonscope.dispatcher.execution as dispatcher_execution
-import axonscope.simulation as simulation_module
-import axonscope.runtime.jax.group_runner as group_runner
-import axonscope.runtime.jax.inputs.extracellular as input_batches
-import axonscope.runtime.jax.kernels.double_cable as double_cable_kernel
-import axonscope.runtime.group_preparation as group_preparation
-import axonscope.runtime.jax.membranes.stacking as membrane_stacking
-from axonscope.runtime.jax.preparation import (
+import axonfleet as axs
+import axonfleet.dispatcher.execution as dispatcher_execution
+import axonfleet.simulation as simulation_module
+import axonfleet.runtime.jax.group_runner as group_runner
+import axonfleet.runtime.jax.inputs.extracellular as input_batches
+import axonfleet.runtime.jax.kernels.double_cable as double_cable_kernel
+import axonfleet.runtime.group_preparation as group_preparation
+import axonfleet.runtime.jax.membranes.stacking as membrane_stacking
+from axonfleet.runtime.jax.preparation import (
     caches as runtime_caches,
     runtime as runtime_preparation,
-    shape_bucketing,
     stacking as runtime_stacking,
 )
-import axonscope.dispatcher.plan as dispatch_plan_module
-import axonscope.dispatcher.progress as progress_module
-from axonscope.dispatcher.numeric_axis import ExtracellularWaveformAxisInput
-from axonscope.benchmarking import benchmark_span
-from axonscope.runtime.input_contract import ExtracellularLoweringMode
-from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
-from axonscope.runtime.jax.inputs.payloads import (
+import axonfleet.dispatcher.plan as dispatch_plan_module
+import axonfleet.dispatcher.progress as progress_module
+from axonfleet.dispatcher.numeric_axis import ExtracellularWaveformAxisInput
+from axonfleet.benchmarking import benchmark_span
+from axonfleet.runtime.inputs.contracts import ExtracellularLoweringMode
+from axonfleet.runtime.inputs.payloads import FactorizedExtracellularPotentialBatch
+from axonfleet.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
 )
-from axonscope.runtime.jax.inputs.lowering import plan_input_lowering
-from axonscope.analytical import PointSourceElectrode
-from axonscope.runtime.jax.inputs.extracellular import (
+from axonfleet.runtime.jax.inputs.lowering import plan_input_lowering
+from axonfleet.analytical import PointSourceElectrode
+from axonfleet.runtime.jax.inputs.extracellular import (
     build_factorized_vstim_midpoint_batch,
     build_vstim_midpoint_batch,
 )
-from axonscope.runtime.jax.inputs.intracellular import (
+from axonfleet.runtime.jax.inputs.intracellular import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
 )
-from axonscope.dispatcher import build_dispatch_plan, run_pool
-from axonscope.dispatcher.execution import DispatchSchedulingOptions
-from axonscope.dispatcher._records import DispatchCohortRecord
-from axonscope.preparation.runtime_batches import (
-    extracellular_stimulation_rows,
-    x_positions_batch_m,
-)
-from axonscope.preparation.membrane_rows import MembraneRowPlan
-from axonscope.runtime.solver_axon import build_solver_axon
-from axonscope.runtime.jax.inputs.payloads import (
+from axonfleet.dispatcher.execution import run_pool as _run_pool
+from axonfleet.dispatcher.plan import build_dispatch_plan
+from axonfleet.dispatcher.execution import DispatchSchedulingOptions
+from axonfleet.dispatcher._records import DispatchCohortRecord
+from axonfleet.preparation.stimulation_rows import extracellular_stimulation_rows
+from axonfleet.preparation.membrane_rows import MembraneRowPlan
+from axonfleet.runtime.solver_axon import build_solver_axon
+from axonfleet.runtime.jax.inputs.payloads import (
     materialize_sparse_intracellular_current_density_batch,
 )
-from axonscope.solvers import BatchOptions
-from axonscope.runtime.jax.preparation.base import (
+from axonfleet.solvers import BatchOptions
+from axonfleet.runtime.jax.preparation.base import (
     prepare_cable_runtime,
     prepare_extracellular_runtime,
     prepare_solver_runtime,
 )
-from axonscope.stimulation import Stimulus
+from axonfleet.runtime.jax.policy.engine_cpu import resolve_cpu_solver_engine
+from axonfleet.stimulation import Stimulus
+
+
+_CPU_RUNTIME_CONTEXT = SimpleNamespace(
+    platform="cpu",
+    solver_engine=resolve_cpu_solver_engine(axs.SolverPolicy()),
+)
+
+
+def _clear_runtime_caches():
+    runtime_caches._BATCH_RUNTIME_CACHE.clear()
+    runtime_caches._BATCH_STATIC_RUNTIME_CACHE.clear()
+    runtime_caches._BATCHED_STATIC_ARRAY_CACHE.clear()
+
+
+def _clear_prepared_cohort_caches():
+    group_preparation._PREPARED_COHORT_CACHE.clear()
+    group_preparation._PREPARED_COHORT_IDENTITY_CACHE.clear()
+
+
+def run_pool(*args, **kwargs):
+    kwargs.setdefault("runtime_context", _CPU_RUNTIME_CONTEXT)
+    return _run_pool(*args, **kwargs)
 
 
 def _membrane_row_plan(group):
     return MembraneRowPlan.from_dispatch_items(group.items)
+
+
+def _x_positions_batch_m(axons):
+    return np.stack(
+        [
+            np.asarray(
+                axon.layout.position_values(unit="micrometer"),
+                dtype=float,
+            )
+            * 1e-6
+            for axon in axons
+        ],
+        axis=0,
+    )
 
 
 def test_balanced_biphasic_temporal_signature_ignores_amplitude_scale():
@@ -506,7 +540,7 @@ def test_dispatch_plan_prepares_temporal_signature_once_per_row(monkeypatch):
 def test_dispatch_plan_cache_survives_amplitude_only_stimulus_replacement(monkeypatch):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     first = dispatch_plan_module.build_dispatch_plan([axon])
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
         drive.id,
@@ -590,26 +624,6 @@ def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():
     assert group.has_padding
 
 
-def test_double_cable_shape_bucketing_is_internal_opt_in(monkeypatch):
-    axons = [
-        _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)
-        for diameter_um in (4.0, 10.0, 20.0)
-    ]
-    group = build_dispatch_plan(axons).groups[0]
-
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
-    assert shape_bucketing.double_cable_kernel_group(group) is group
-
-    monkeypatch.setenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", "1")
-    kernel_group = shape_bucketing.double_cable_kernel_group(group)
-
-    assert kernel_group is not group
-    assert kernel_group.size >= group.size
-    assert kernel_group.nx >= group.nx
-    assert kernel_group.items[: group.size] == group.items
-    assert kernel_group.items[-1] == group.items[-1]
-
-
 def test_double_cable_gpu_route_rejects_cpu_thomas_solver():
     engine = SimpleNamespace(
         double_cable_block_solver="thomas",
@@ -690,12 +704,10 @@ def test_jax_group_runner_rejects_unknown_cable_mode():
             tsim_ms=0.1,
             dt_ms=0.05,
             batch_options=BatchOptions.none(),
-            solver_options=None,
         )
 
 
 def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeypatch):
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [_mrg_axon(diameter_um=10.0, amp_nA=0.1)]
     group = build_dispatch_plan(axons).groups[0]
 
@@ -704,7 +716,6 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
@@ -726,7 +737,6 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
 
 
 def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [
         _mrg_axon(diameter_um=7.3, amp_nA=0.1),
         _mrg_axon(diameter_um=10.0, amp_nA=0.2),
@@ -739,7 +749,6 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
@@ -756,7 +765,6 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
 def test_gated_leak_stack_extracts_stateless_leaks_without_jax_program_build(
     monkeypatch,
 ):
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     group = build_dispatch_plan(
         [
             _mrg_axon(diameter_um=7.3, amp_nA=0.1),
@@ -776,7 +784,6 @@ def test_gated_leak_stack_extracts_stateless_leaks_without_jax_program_build(
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
@@ -817,7 +824,6 @@ def test_host_stateless_leak_encoding_matches_compiled_program():
 
 
 def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [
         _mrg_axon(diameter_um=7.3, amp_nA=0.1),
         _mrg_axon(diameter_um=10.0, amp_nA=0.2),
@@ -828,7 +834,6 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
@@ -884,9 +889,8 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
 
 
 def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
-    from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
+    from axonfleet.runtime.jax.membranes.program import JaxMembraneProgram
 
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     monkeypatch.setattr(
         JaxMembraneProgram,
         "init_gates",
@@ -899,7 +903,6 @@ def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
@@ -934,9 +937,8 @@ def test_dispatch_normalization_computes_each_model_signature_once(monkeypatch):
 
 
 def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monkeypatch):
-    from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
+    from axonfleet.runtime.jax.membranes.program import JaxMembraneProgram
 
-    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [
         _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)
         for diameter_um in (4.0, 10.0, 20.0)
@@ -947,16 +949,14 @@ def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monk
         _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
 
-    runtime_caches.clear_batch_runtime_caches()
+    _clear_runtime_caches()
     runtime = runtime_preparation.prepare_batch_runtime(
         group,
         tsim_ms=0.05,
         dt_ms=0.01,
-        solver_options=None,
         mode="double",
         include_extracellular=True,
         include_area=True,
@@ -1063,7 +1063,6 @@ def test_pool_batches_generated_parameter_rows_without_isoform_fragmentation(
         _membrane_row_plan(plan.groups[0]),
         target_nx=plan.groups[0].nx,
         dtype_local=plan.groups[0].items[0].solver_axon.dtype,
-        solver_options=None,
         compiled_models_by_signature={},
     )
     batched = _run_simulation(
@@ -1198,7 +1197,7 @@ def test_run_pool_observer_only_batches_singleton_groups():
 def test_dispatch_groups_scaled_extracellular_waveforms():
     axon_a = _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0)
     axon_b = _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0)
-    stimulation = axon_b.extracellular_stimulations[0]
+    stimulation = axon_b.extracellular_stimulation
     drive = stimulation.drives[0]
     axon_b.add_extracellular_stimulation(
         stimulation=stimulation.replace_drive(
@@ -1221,7 +1220,7 @@ def test_dispatch_groups_scaled_extracellular_waveforms():
 def test_run_pool_reports_scaled_extracellular_waveform_lowering(tmp_path):
     axon_a = _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0)
     axon_b = _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0)
-    stimulation = axon_b.extracellular_stimulations[0]
+    stimulation = axon_b.extracellular_stimulation
     drive = stimulation.drives[0]
     axon_b.add_extracellular_stimulation(
         stimulation=stimulation.replace_drive(
@@ -1425,7 +1424,7 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
         target=axs.positions.CENTER,
     )
     axs.enable_benchmark(
-        "/tmp/axonscope-double-factorized-vstim-test",
+        "/tmp/axonfleet-double-factorized-vstim-test",
         print_summary=False,
         save=False,
     )
@@ -1748,7 +1747,7 @@ def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_d
     )
 
     axs.enable_benchmark(
-        "/tmp/axonscope-single-rank-k-factorized-vstim-test",
+        "/tmp/axonfleet-single-rank-k-factorized-vstim-test",
         print_summary=False,
         save=False,
     )
@@ -1783,7 +1782,7 @@ def test_singleton_batch_retained_vm_emits_standard_hotpath_spans():
     axon = _hh_axon(nx=11, amp_nA=0.1)
 
     axs.enable_benchmark(
-        "/tmp/axonscope-scalar-hotpath-span-test",
+        "/tmp/axonfleet-scalar-hotpath-span-test",
         print_summary=False,
         save=False,
     )
@@ -1847,7 +1846,7 @@ def test_double_cable_batch_extracellular_stack_matches_row_runtime():
         include_extracellular=True,
     ).membrane.dtype
 
-    stacked = runtime_stacking.stack_extracellular_runtime(
+    stacked = runtime_stacking._stack_extracellular_runtime(
         group_preparation.prepared_cohort_for_current_group(group).materialized_axons,
         dtype_local=dtype_local,
     )
@@ -1922,9 +1921,9 @@ def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
             _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
         ]
 
-    runtime_caches.clear_batch_runtime_caches()
+    _clear_runtime_caches()
     axs.enable_benchmark(
-        "/tmp/axonscope-structural-runtime-cache-test",
+        "/tmp/axonfleet-structural-runtime-cache-test",
         print_summary=False,
         save=False,
     )
@@ -1955,7 +1954,7 @@ def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
 
 def test_batch_runtime_cache_ignores_zero_to_nonzero_stimulus_shape_change():
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     zero = stimulation.replace_drive(
         drive.id,
@@ -1967,9 +1966,9 @@ def test_batch_runtime_cache_ignores_zero_to_nonzero_stimulus_shape_change():
     )
     axon.add_extracellular_stimulation(stimulation=zero, replace=True)
 
-    runtime_caches.clear_batch_runtime_caches()
+    _clear_runtime_caches()
     axs.enable_benchmark(
-        "/tmp/axonscope-runtime-cache-zero-nonzero-test",
+        "/tmp/axonfleet-runtime-cache-zero-nonzero-test",
         print_summary=False,
         save=False,
     )
@@ -2014,9 +2013,9 @@ def test_batch_static_runtime_cache_reuses_equivalent_pool_with_new_time_grid():
             _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
         ]
 
-    runtime_caches.clear_batch_runtime_caches()
+    _clear_runtime_caches()
     axs.enable_benchmark(
-        "/tmp/axonscope-static-runtime-cache-test",
+        "/tmp/axonfleet-static-runtime-cache-test",
         print_summary=False,
         save=False,
     )
@@ -2059,7 +2058,7 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
 
-    group_preparation.clear_prepared_cohort_cache()
+    _clear_prepared_cohort_caches()
     first = group_preparation.prepared_cohort_for_group(group)
     stimulation = first.stimulations[0][0]
     drive = stimulation.drives[0]
@@ -2089,14 +2088,14 @@ def test_prepared_cohort_cache_reuses_spatial_rows_for_equivalent_new_pool():
     first_group = build_dispatch_plan([first_axon]).groups[0]
     second_group = build_dispatch_plan([second_axon]).groups[0]
 
-    group_preparation.clear_prepared_cohort_cache()
+    _clear_prepared_cohort_caches()
     first = group_preparation.prepared_cohort_for_group(first_group)
     second = group_preparation.prepared_cohort_for_group(second_group)
 
     assert second is not first
     assert second.axons == (second_axon,)
     assert second.solver_axons == (second_group.items[0].solver_axon,)
-    assert second.stimulations == (second_axon.extracellular_stimulations,)
+    assert second.stimulations == ((second_axon.extracellular_stimulation,),)
     assert second.x_positions_m is first.x_positions_m
     assert second.spatial_cache_token is first.spatial_cache_token
 
@@ -2127,7 +2126,7 @@ def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
 
-    group_preparation.clear_prepared_cohort_cache()
+    _clear_prepared_cohort_caches()
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
         with benchmark_span("inputs.positions"):
@@ -2151,10 +2150,10 @@ def test_current_group_prepared_cohort_cache_refreshes_replaced_stimulus():
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
 
-    group_preparation.clear_prepared_cohort_cache()
+    _clear_prepared_cohort_caches()
     first = group_preparation.prepared_cohort_for_current_group(group)
 
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
         drive.id,
@@ -2176,7 +2175,7 @@ def test_current_group_prepared_cohort_cache_refreshes_replaced_stimulus():
 
 def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
         drive.id,
@@ -2271,7 +2270,7 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
 
 def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     stimulus = Stimulus.pulse(
         start=0.0 * axs.ms,
@@ -2338,7 +2337,7 @@ def test_factorized_vstim_can_defer_currents_for_numeric_axis(monkeypatch):
     monkeypatch.setattr(Stimulus, "evaluate", fail_if_sampled)
     payload = build_factorized_vstim_midpoint_batch(
         axon,
-        [axon.extracellular_stimulations],
+        [(axon.extracellular_stimulation,)],
         tsim_ms=0.1,
         dt_ms=0.05,
         dtype_local=np.float32,
@@ -2356,8 +2355,8 @@ def test_factorized_vstim_samples_numeric_axis_source_footprints_once(monkeypatc
     axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     axon_b = _hh_axon(nx=11, amp_nA=0.1, y_um=50.0, z_um=70.0)
     source_rows = [
-        (axon_a.extracellular_stimulations[0],),
-        (axon_b.extracellular_stimulations[0],),
+        (axon_a.extracellular_stimulation,),
+        (axon_b.extracellular_stimulation,),
     ]
     source_payload = build_factorized_vstim_midpoint_batch(
         axon_a,
@@ -2417,7 +2416,7 @@ def test_factorized_vstim_lowers_scaled_waveforms_as_row_scales(
     amplitudes,
 ):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     rows = []
     for amplitude in amplitudes:
@@ -2428,8 +2427,8 @@ def test_factorized_vstim_lowers_scaled_waveforms_as_row_scales(
         ).as_unit("ampere")
         rows.append((stimulation.replace_drive(drive.id, stimulus=stimulus),))
 
-    from axonscope.runtime.input_contract import ExtracellularLoweringMode
-    from axonscope.runtime.input_planning import (
+    from axonfleet.runtime.inputs.contracts import ExtracellularLoweringMode
+    from axonfleet.runtime.inputs.planning import (
         planned_factorized_extracellular_mode_from_rows,
     )
 
@@ -2492,7 +2491,7 @@ def test_factorized_vstim_keeps_equal_scaled_waveforms_shared(
     tmp_path,
 ):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     rows = []
     for _ in range(4):
@@ -2542,7 +2541,7 @@ def test_factorized_vstim_keeps_current_table_for_non_scaled_waveforms(
     tmp_path,
 ):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
+    stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     rows = []
     for duration in (0.05, 0.04, 0.05, 0.04):
@@ -2608,7 +2607,7 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         device="gpu:0",
     )
 
-    runtime_caches.clear_batch_runtime_caches()
+    _clear_runtime_caches()
     materialized_axons = (
         group_preparation.prepared_cohort_for_current_group(group).materialized_axons
     )
@@ -2617,7 +2616,6 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         group,
         tsim_ms=0.1,
         dt_ms=0.05,
-        solver_options=None,
         mode="single",
         include_extracellular=False,
         include_area=False,
@@ -2629,7 +2627,6 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         group,
         tsim_ms=0.1,
         dt_ms=0.05,
-        solver_options=None,
         mode="single",
         include_extracellular=False,
         include_area=False,
@@ -2641,7 +2638,6 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         group,
         tsim_ms=0.1,
         dt_ms=0.05,
-        solver_options=None,
         mode="single",
         include_extracellular=False,
         include_area=False,
@@ -3041,7 +3037,7 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
     assert "building dispatch plan" in captured.out
     assert "Dispatch progress" in captured.out
     assert "group   g0 1/1 batch-single-cable" in captured.out
-    assert "route   g0 1/1  compatible batch route" in captured.out
+    assert "route   g0 1/1  planned batch route" in captured.out
     assert "prepare g0 1/1  runtime" in captured.out
     assert "batch   g0 1/1  recording plan" in captured.out
     assert "lower   g0 1/1  inputs" in captured.out
@@ -3079,7 +3075,7 @@ def test_pool_dispatch_plain_progress_reports_singleton_batch_route(capsys):
 
     captured = capsys.readouterr()
     assert len(result) == 1
-    assert "route   g0 1/1  compatible batch route" in captured.out
+    assert "route   g0 1/1  planned batch route" in captured.out
     assert "(batch" in captured.out
     assert "compiling JAX kernel if needed" in captured.out
     assert "completed JAX work" in captured.out
@@ -3144,18 +3140,26 @@ def test_pool_vstim_batch_uses_sampled_point_source_stimulation():
         extracellular_stimulation_rows([near, far]),
         tsim_ms=0.1,
         dt_ms=0.05,
-        x_positions_m=x_positions_batch_m([near, far]),
+        x_positions_m=_x_positions_batch_m([near, far]),
     )
 
     center = near.n_compartments // 2
     assert float(vstim[0, 0, center]) > float(vstim[1, 0, center])
     assert np.allclose(
         np.asarray(vstim[0, 0]),
-        np.asarray(near.extracellular_potential_mV(0.025)),
+        np.asarray(
+            near.extracellular_stimulation.evaluate(
+                [0.025], voltage_unit="millivolt"
+            )[0]
+        ),
     )
     assert np.allclose(
         np.asarray(vstim[1, 0]),
-        np.asarray(far.extracellular_potential_mV(0.025)),
+        np.asarray(
+            far.extracellular_stimulation.evaluate(
+                [0.025], voltage_unit="millivolt"
+            )[0]
+        ),
     )
 
 
@@ -3174,7 +3178,7 @@ def test_pool_vstim_batch_empty_context_rows_returns_zero_without_yz():
         [None, None],
         tsim_ms=0.1,
         dt_ms=0.05,
-        x_positions_m=x_positions_batch_m([axon_a, axon_b]),
+        x_positions_m=_x_positions_batch_m([axon_a, axon_b]),
     )
 
     assert np.asarray(vstim).shape == (2, 2, 11)
@@ -3206,8 +3210,6 @@ def test_intracellular_current_density_batch_uses_current_clamps():
         solver_axon=solver_axon,
         include_extracellular=False,
         include_area=False,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
     )
 
     batch = build_intracellular_current_density_batch(
@@ -3259,8 +3261,6 @@ def test_sparse_intracellular_current_density_batch_matches_dense_clamps():
         solver_axon=solver_axon,
         include_extracellular=False,
         include_area=False,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
     )
 
     dense = build_intracellular_current_density_batch(
@@ -3316,8 +3316,6 @@ def test_sparse_intracellular_pulse_batch_matches_dense_clamps():
         solver_axon=solver_axon,
         include_extracellular=False,
         include_area=False,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
     )
 
     dense = build_intracellular_current_density_batch(

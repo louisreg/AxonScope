@@ -207,13 +207,13 @@ class BottleneckEvent:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build a P11B bottleneck report from benchmark event traces.",
+        description="Build a bottleneck report from benchmark event traces.",
     )
     parser.add_argument("run_dirs", nargs="+", type=Path)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark/results/p11b_bottleneck_report"),
+        default=Path("benchmark/results/bottleneck_report"),
     )
     parser.add_argument(
         "--phase",
@@ -461,7 +461,7 @@ def write_report(
     by_run_group = _group_by_run(group_rows)
     contexts = _contexts_by_run(events)
     lines: list[str] = [
-        "# P11B Bottleneck Report",
+        "# Bottleneck Report",
         "",
         "This report ranks benchmark spans by exclusive self time. Use it to select",
         "the next optimization target; it is not a speed claim by itself.",

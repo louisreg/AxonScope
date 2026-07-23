@@ -61,7 +61,7 @@ def install_production_jax_captures(
         raise ValueError("route must be 'observer' or 'recording'.")
 
     if "single" in requested:
-        import axonscope.runtime.jax.kernels.single_cable as single_cable
+        import axonfleet.runtime.jax.kernels.single_cable as single_cable
 
         _install_capture(
             single_cable,
@@ -80,7 +80,7 @@ def install_production_jax_captures(
         )
 
     if "double" in requested:
-        import axonscope.runtime.jax.kernels.double_cable as double_cable
+        import axonfleet.runtime.jax.kernels.double_cable as double_cable
 
         gpu_platform = str(platform).lower() == "gpu"
         _install_capture(
@@ -136,7 +136,7 @@ def _install_capture(
 
         triton_kernel_cache = None
         if label == "double":
-            from axonscope.runtime.jax.kernels.triton_call_cache import (
+            from axonfleet.runtime.jax.kernels.triton_call_cache import (
                 last_triton_kernel_cache_event,
             )
 

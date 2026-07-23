@@ -1,14 +1,10 @@
 import numpy as np
 import pytest
 
-import axonscope as axs
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import Stimulus
-from axonscope.stimulation import (
-    IntracellularContext,
-    IntracellularCurrentClamp,
-)
-from axonscope.runtime.jax.inputs.stimulus import compile_stimulus
+import axonfleet as axs
+from axonfleet.analytical import PointSourceElectrode
+from axonfleet.stimulation import Stimulus
+from axonfleet.stimulation import IntracellularCurrentClamp
 
 
 # ==========================================================
@@ -83,22 +79,6 @@ def test_zero_balanced_biphasic_keeps_declared_phase_timing():
     np.testing.assert_allclose(zero.t, driven.t)
     np.testing.assert_allclose(zero.y, 0.0)
     assert zero._scale_shape == driven._scale_shape
-
-
-def test_ramp_linear():
-    stim = Stimulus.ramp(
-        start=0.0 * axs.ms,
-        duration=1.0 * axs.ms,
-        start_value=0.0,
-        stop_value=10.0,
-        dt=0.1 * axs.ms,
-    )
-
-    vals = stim.evaluate([0.0, 0.5, 1.0])
-
-    assert np.isclose(vals[0], 0.0)
-    assert np.isclose(vals[1], 5.0, atol=1e-6)
-    assert np.isclose(vals[2], 10.0)
 
 
 def test_evaluate_accepts_pint_time_and_output_unit():
@@ -176,105 +156,56 @@ def test_duplicate_times_keep_last_value():
     assert np.isclose(val, 7.0)
 
 
-# ==========================================================
-# ALGEBRA
-# ==========================================================
+def test_add_stimuli_on_the_union_of_sample_times():
+    pulse = Stimulus.pulse(1.0 * axs.ms, 2.0 * axs.nA, 1.0 * axs.ms)
+    baseline = Stimulus.constant(1.0 * axs.nA)
 
-def test_add_scalar():
-    stim = Stimulus.constant(2.0)
-    out = stim + 3.0
+    combined = pulse + baseline
 
-    assert np.isclose(out.evaluate([0])[0], 5.0)
-
-
-def test_multiply_scalar():
-    stim = Stimulus.constant(4.0)
-    out = 0.5 * stim
-
-    assert np.isclose(out.evaluate([0])[0], 2.0)
+    np.testing.assert_allclose(combined.evaluate([0.0, 1.5, 3.0]), [1.0, 3.0, 1.0])
+    assert combined.y_unit == "nanoampere"
 
 
-def test_add_two_stimuli():
-    a = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
-    b = Stimulus.constant(1.0)
+def test_ramp_uses_linear_interpolation():
+    ramp = Stimulus.ramp(
+        start=0.0 * axs.ms,
+        duration=1.0 * axs.ms,
+        start_value=0.0,
+        stop_value=10.0,
+        dt=0.1 * axs.ms,
+    )
 
-    c = a + b
-
-    vals = c.evaluate([0.0, 1.5, 3.0])
-
-    assert np.isclose(vals[0], 1.0)
-    assert np.isclose(vals[1], 3.0)
-    assert np.isclose(vals[2], 1.0)
-
-
-def test_sub_two_stimuli():
-    a = Stimulus.constant(5.0)
-    b = Stimulus.constant(2.0)
-
-    c = a - b
-
-    assert np.isclose(c.evaluate([0])[0], 3.0)
+    np.testing.assert_allclose(ramp.evaluate([0.0, 0.5, 1.0]), [0.0, 5.0, 10.0])
 
 
-# ==========================================================
-# SHIFT / SCALE / OFFSET
-# ==========================================================
+def test_stimulus_algebra_and_transformations():
+    pulse = Stimulus.pulse(1.0 * axs.ms, 3.0, 1.0 * axs.ms)
+    shifted = pulse.shifted(2.0 * axs.ms)
+    transformed = 2.0 * shifted.scaled(0.5).offset(1.0) - 1.0
 
-def test_shift():
-    stim = Stimulus.pulse(1.0 * axs.ms, 3.0, 1.0 * axs.ms)
-    shifted = stim.shifted(2.0 * axs.ms)
+    np.testing.assert_allclose(transformed.evaluate([1.5, 3.5]), [1.0, 4.0])
 
-    vals = shifted.evaluate([1.5, 3.5])
-
-    assert np.isclose(vals[0], 0.0)
-    assert np.isclose(vals[1], 3.0)
+    product = Stimulus.constant(2.0) * Stimulus.constant(4.0)
+    assert product.evaluate(0.0) == 8.0
 
 
-def test_scaled():
-    stim = Stimulus.constant(2.0)
-    out = stim.scaled(4.0)
+def test_synchronize_and_insert_samples_align_grids():
+    first = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
+    second = Stimulus.pulse(2.0 * axs.ms, 3.0, 1.0 * axs.ms)
 
-    assert np.isclose(out.evaluate([0])[0], 8.0)
+    left, right = first.synchronize(second)
+    inserted = first.insert_samples(np.asarray([0.5, 1.5]) * axs.ms)
 
-
-def test_offset():
-    stim = Stimulus.constant(2.0)
-    out = stim.offset(-1.0)
-
-    assert np.isclose(out.evaluate([0])[0], 1.0)
-
-
-# ==========================================================
-# SYNCHRONIZATION
-# ==========================================================
-
-def test_synchronize():
-    a = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
-    b = Stimulus.pulse(2.0 * axs.ms, 3.0, 1.0 * axs.ms)
-
-    sa, sb = a.synchronize(b)
-
-    assert np.allclose(sa.t, sb.t)
-    assert len(sa.t) >= max(len(a.t), len(b.t))
-
-
-# ==========================================================
-# JAX BACKEND OBJECT
-# ==========================================================
-
-def test_compile_stimulus_callable():
-    stim = Stimulus.pulse(1.0 * axs.ms, 5.0, 1.0 * axs.ms)
-    jstim = compile_stimulus(stim)
-
-    val = float(jstim(1.5))
-    assert np.isclose(val, 5.0)
+    np.testing.assert_array_equal(left.t, right.t)
+    assert 0.5 in inserted.t
+    assert 1.5 in inserted.t
 
 
 def test_physical_contexts_assign_canonical_current_units():
     stim = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
 
     clamp = IntracellularCurrentClamp(position=100.0 * axs.um, current=stim)
-    assert isinstance(clamp, IntracellularContext)
+    assert isinstance(clamp, IntracellularCurrentClamp)
     assert clamp.position_um == 100.0
     assert clamp.current.y_unit == "nanoampere"
     assert np.allclose(clamp.current.y, stim.y)
@@ -320,6 +251,5 @@ def test_stimulus_constructors_require_time_units():
     with pytest.raises(TypeError, match="t must include units compatible with time"):
         Stimulus.from_samples([0.0, 1.0], [0.0, 1.0])
 
-    stim = Stimulus.constant(1.0)
     with pytest.raises(TypeError, match="dt must include units compatible with time"):
-        stim.shifted(1.0)
+        Stimulus.constant(1.0).shifted(1.0)

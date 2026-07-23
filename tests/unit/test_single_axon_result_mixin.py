@@ -4,11 +4,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import axonscope as axs
-from axonscope.analysis import ActivationCriterion, detect_activation
-from axonscope.analysis import conduction_velocity, rasterize, recorded_positions_um
-from axonscope.axons.unmyelinated import RattayAberham
-from axonscope.stimulation import Stimulus
+import axonfleet as axs
+from axonfleet.analysis import Activation
+from axonfleet.analysis import ConductionVelocity, rasterize
+from axonfleet.axons.unmyelinated import RattayAberham
+from axonfleet.stimulation import Stimulus
 from tests.helpers import FakeSingleAxonResult
 
 
@@ -65,7 +65,10 @@ def test_analysis_uses_record_indices_for_filtered_results(fake_result):
         record_indices=(1,),
     )
 
-    assert np.allclose(recorded_positions_um(filtered), [500.0])
+    assert np.allclose(
+        filtered.recorded_axis.position_values(unit=axs.um),
+        [500.0],
+    )
     _, xAP = rasterize(filtered, threshold_mV=0.0, min_distance_ms=2.0)
     assert np.allclose(xAP, [500.0])
 
@@ -78,7 +81,7 @@ def test_analysis_rejects_filtered_results_without_position_mapping(fake_result)
     )
 
     with pytest.raises(ValueError, match="record_indices"):
-        recorded_positions_um(filtered)
+        filtered.recorded_axis.position_values(unit=axs.um)
 
 
 def test_result_value_helpers_convert_units(fake_result):
@@ -124,7 +127,7 @@ def test_result_recorded_axis_exposes_intrinsic_positions(fake_result):
 
     axis = filtered.recorded_axis
 
-    assert isinstance(axis, axs.RecordedAxis)
+    assert isinstance(axis, axs.results.RecordedAxis)
     assert axis.size == 1
     assert axis.original_indices == (1,)
     np.testing.assert_allclose(axis.position_values(unit=axs.um), [500.0])
@@ -133,11 +136,10 @@ def test_result_recorded_axis_exposes_intrinsic_positions(fake_result):
 
 
 def test_activation_criterion_detects_first_crossing(fake_result):
-    event = detect_activation(
-        fake_result,
+    event = Activation(
         threshold=1.0 * axs.mV,
         blanking=0.0 * axs.ms,
-    )
+    ).detect(fake_result)
 
     assert event.activated
     assert event.first_index == 0
@@ -147,11 +149,11 @@ def test_activation_criterion_detects_first_crossing(fake_result):
 
 
 def test_activation_criterion_respects_blanking_and_indices(fake_result):
-    event = ActivationCriterion(
+    event = Activation(
         threshold=1.0 * axs.mV,
         blanking=20.0 * axs.ms,
         target=axs.positions.Indices([1]),
-    ).evaluate(fake_result)
+    ).detect(fake_result)
 
     assert event.activated
     assert event.first_index == 1
@@ -160,14 +162,14 @@ def test_activation_criterion_respects_blanking_and_indices(fake_result):
 
 
 def test_activation_criterion_accepts_typed_position_targets(fake_result):
-    center = ActivationCriterion(
+    center = Activation(
         threshold=1.0 * axs.mV,
         target=axs.positions.CENTER,
-    ).evaluate(fake_result)
-    by_position = ActivationCriterion(
+    ).detect(fake_result)
+    by_position = Activation(
         threshold=1.0 * axs.mV,
         target=axs.positions.At(0.5 * axs.mm),
-    ).evaluate(fake_result)
+    ).detect(fake_result)
 
     assert center.activated
     assert center.first_index == 1
@@ -183,10 +185,10 @@ def test_activation_criterion_handles_filtered_results(fake_result):
         record_indices=(1,),
     )
 
-    event = ActivationCriterion(
+    event = Activation(
         threshold=1.0 * axs.mV,
         target=axs.positions.Indices([1]),
-    ).evaluate(filtered)
+    ).detect(filtered)
 
     assert event.activated
     assert event.first_index == 1
@@ -194,7 +196,7 @@ def test_activation_criterion_handles_filtered_results(fake_result):
 
 
 def test_activation_criterion_reports_no_activation(fake_result):
-    event = ActivationCriterion(threshold=100.0 * axs.mV).evaluate(fake_result)
+    event = Activation(threshold=100.0 * axs.mV).detect(fake_result)
 
     assert not event.activated
     assert event.first_time_ms is None
@@ -261,8 +263,8 @@ def test_result_view_plots_multiple_traces_axis_and_recording_groups(fake_result
 
 
 def test_population_and_vmraster_view_plots(fake_result):
-    from axonscope.results.pool import AxonSimulationResult
-    from axonscope.results.pool import _ResultBlock
+    from axonfleet.results.pool import AxonSimulationResult
+    from axonfleet.results.pool import _ResultBlock
 
     cohort = _ResultBlock(
         input_indices=(0, 1),
@@ -360,7 +362,7 @@ def test_compute_propagation_velocity():
     )
 
     simres = axs.AxonSimulation(axon, duration=10.0, dt=0.01).run().single
-    velocity = conduction_velocity(simres)
+    velocity = ConductionVelocity().detect(simres)
 
     assert velocity is not None
     assert np.isfinite(velocity)

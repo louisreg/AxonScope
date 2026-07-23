@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from axonscope.runtime.jax.kernels import triton_single_cable
-from axonscope.runtime.jax.kernels.triton_single_cable import (
+from axonfleet.runtime.jax.kernels import triton_single_cable
+from axonfleet.runtime.jax.kernels.triton_single_cable import (
     single_cable_triton_dependency_skip_reason,
 )
 from benchmark.solvers.single_cable_triton_gate import (
@@ -66,7 +66,7 @@ def test_custom_vmap_collapses_rows_to_one_node_first_solve(monkeypatch):
         fake_solve,
     )
     rows = jnp.arange(20, dtype=jnp.float32).reshape((4, 5))
-    from axonscope.runtime.jax.kernels import single_cable_scans
+    from axonfleet.runtime.jax.kernels import single_cable_scans
 
     monkeypatch.setattr(
         single_cable_scans,

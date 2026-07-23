@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import axonscope as axs
-from axonscope.integrations import nrv as axs_nrv
+import axonfleet as axs
+from axonfleet.integrations import nrv as axs_nrv
 
 
 class _FakeTable:
@@ -83,19 +83,10 @@ class _FakeExtraStim:
         self.clear_count += 1
 
 
-class _FakeAxonResult(dict):
-    def __init__(self, recruited):
-        super().__init__()
-        self._recruited = bool(recruited)
-
-    def is_recruited(self, *, vm_key, t_start):
-        assert vm_key == "V_mem"
-        assert float(t_start) == 0.1
-        return self._recruited
-
-
 def test_nrv_integration_exposes_only_bridge_contracts():
     forbidden = {
+        "FiberKind",
+        "NRVActivationComparison",
         "build_synthetic_4_fascicle_nerve",
         "build_histology_contour_nerve",
         "build_nerve_from_mode",
@@ -103,6 +94,12 @@ def test_nrv_integration_exposes_only_bridge_contracts():
         "NRVLifeElectrodeSetup",
         "life_pulse_stimulus",
         "replace_life_current",
+        "activation_comparisons",
+        "nrv_activation_by_row",
+        "nrv_fascicle_by_id",
+        "nrv_row_id",
+        "row_key",
+        "stimulation_from_footprint",
     }
 
     assert forbidden.isdisjoint(set(axs_nrv.__all__))
@@ -128,11 +125,9 @@ def test_population_from_nrv_honors_nrv_masks_and_node_shift():
     assert [row.kind for row in rows] == ["mrg", "mrg"]
     assert rows[0].fascicle_id == "0"
     assert rows[0].x_shift_um > 0.0
-    assert axs_nrv.row_key(rows[0]) == ("0", 0)
-    assert bridge.limit(1).rows == (rows[0],)
 
 
-def test_population_from_nrv_builds_axonscope_population_without_footprints():
+def test_population_from_nrv_builds_axonfleet_population_without_footprints():
     fascicle = _FakeFascicle(
         [
             (0, {"types": 1, "diameters": 8.0, "y": 1.0, "z": 2.0, "node_shift": 0.25}),
@@ -147,8 +142,8 @@ def test_population_from_nrv_builds_axonscope_population_without_footprints():
     assert isinstance(bridge.population, axs.AxonPopulation)
     assert len(bridge) == 2
     assert [row.fiber_index for row in bridge.rows] == [0, 1]
-    assert bridge.instances[0].extracellular_stimulation is None
-    assert bridge.axons[0].n_compartments > 0
+    assert bridge.population.instances[0].extracellular_stimulation is None
+    assert bridge.population.axons[0].n_compartments > 0
 
 
 def test_population_from_nrv_shares_only_exact_axon_templates():
@@ -166,9 +161,9 @@ def test_population_from_nrv_shares_only_exact_axon_templates():
         nerve_length_um=10_000.0,
     )
 
-    assert bridge.axons[0] is bridge.axons[1]
-    assert bridge.axons[2] is not bridge.axons[0]
-    assert bridge.instances[0] is not bridge.instances[1]
+    assert bridge.population.axons[0] is bridge.population.axons[1]
+    assert bridge.population.axons[2] is not bridge.population.axons[0]
+    assert bridge.population.instances[0] is not bridge.population.instances[1]
 
 
 def test_footprints_from_nrv_samples_all_electrodes_for_population_bridge():
@@ -201,7 +196,7 @@ def test_footprints_from_nrv_samples_all_electrodes_for_population_bridge():
 
     footprints = axs_nrv.footprints_from_nrv(nerve, bridge)
 
-    assert footprints.electrode_count == 2
+    assert len(footprints.electrode_ids) == 2
     assert footprints.electrode_ids == ("e0", "e1")
     assert len(extra_stim.compute_calls) == 2
     assert extra_stim.clear_count == 2
@@ -230,7 +225,7 @@ def test_stimulated_population_and_current_replacement_use_one_drive_contract():
     )
     rows = (axs_nrv.NRVFiberRow("0", 0, "rattay", 0.5, 0.0, 0.0),)
     footprints = axs_nrv.NRVFootprints(
-        population=axs.AxonPopulation.single(axon),
+        population=axs.AxonPopulation(axon),
         rows=rows,
         footprints=((footprint,),),
         electrode_ids=("life",),
@@ -261,33 +256,3 @@ def test_stimulated_population_and_current_replacement_use_one_drive_contract():
         unit=axs.uA,
     )
     np.testing.assert_allclose(current_uA, [-9.0])
-
-
-def test_nrv_activation_decoding_and_comparisons():
-    rows = [
-        axs_nrv.NRVFiberRow("0", 0, "mrg", 8.0, 0.0, 0.0),
-        axs_nrv.NRVFiberRow("0", 2, "rattay", 0.8, 0.0, 0.0),
-    ]
-    fascicle = SimpleNamespace(sim_list=[0, 2])
-    nerve = SimpleNamespace(fascicles={0: fascicle})
-    nrv_result = {
-        "fascicle0": {
-            "axon0": {"recruited": True},
-            "axon1": _FakeAxonResult(False),
-        }
-    }
-
-    decoded = axs_nrv.nrv_activation_by_row(
-        nrv_result,
-        nerve,
-        rows,
-        t_start_ms=0.1,
-    )
-    comparisons = axs_nrv.activation_comparisons(
-        rows,
-        nrv_activated=decoded,
-        axonscope_activated=[True, True],
-    )
-
-    assert decoded == {("0", 0): True, ("0", 2): False}
-    assert [item.matched for item in comparisons] == [True, False]

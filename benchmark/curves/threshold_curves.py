@@ -14,12 +14,7 @@ from benchmark.workloads.curve_runtime import run_threshold_curves
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser(
         "threshold_curves",
-        description="Activation/block threshold curve benchmark scaffold.",
-    )
-    parser.add_argument(
-        "--threshold-kind",
-        choices=("activation", "block", "both"),
-        default="activation",
+        description="Activation-threshold curve benchmark.",
     )
     args = parser.parse_args(argv)
     if args.dry_run:

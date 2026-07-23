@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from axonscope.results.axes import RecordedAxis
-from axonscope.results.common import SingleAxonResultMixin
-from axonscope.signals import Signal
+from axonfleet.results.axes import RecordedAxis
+from axonfleet.results.common import SingleAxonResultMixin
+from axonfleet.signals import Signal
 
 
-@dataclass
 class FakeSingleAxonResult(SingleAxonResultMixin):
     """Small one-axon result object used by tests."""
 
@@ -40,7 +38,7 @@ class FakeSingleAxonResult(SingleAxonResultMixin):
 
     @property
     def Vm(self) -> Any:
-        from axonscope.signals import MEMBRANE_VOLTAGE
+        from axonfleet.signals import MEMBRANE_VOLTAGE
 
         try:
             return self.signal(MEMBRANE_VOLTAGE)
@@ -49,9 +47,9 @@ class FakeSingleAxonResult(SingleAxonResultMixin):
 
     def signal(self, signal: Any) -> Any:
         if isinstance(signal, str):
-            raise TypeError("signal must use axonscope.signals values, not strings.")
+            raise TypeError("signal must use axonfleet.signals values, not strings.")
         if not isinstance(signal, Signal):
-            raise TypeError("signal must be an axonscope.Signal descriptor.")
+            raise TypeError("signal must be an axonfleet.Signal descriptor.")
         if self.recordings is None or signal.result_key not in self.recordings:
             raise KeyError(signal.result_key)
         value = self.recordings[signal.result_key]
