@@ -29,6 +29,16 @@ def _stimulated_hh(amplitude_na: float) -> axs.AxonInstance:
     return axon
 
 
+def _mrg() -> axs.AxonInstance:
+    return axs.AxonInstance(
+        axs.axons.MRG(
+            diameter=5.7 * axs.um,
+            nodes=3,
+            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+        )
+    )
+
+
 def main() -> None:
     rows = [_stimulated_hh(0.30), _stimulated_hh(0.60)]
 
@@ -55,6 +65,25 @@ def main() -> None:
 
     print(f"gates-only available: {[signal.id.value for signal in gates_only.recording_manifest.available_signals]}")
     print(f"gates-only m gate block: {gates_only.signal(axs.signals.GATES)['hodgkin_huxley.m'].shape}")
+
+    double_cable = axs.AxonSimulation(
+        _mrg(),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.probes(
+            (
+                axs.signals.Vm,
+                axs.signals.GATES,
+                axs.signals.CURRENTS,
+                axs.signals.CONDUCTANCES,
+            ),
+            count=3,
+        ),
+    ).run().single
+
+    print(f"double-cable route: {double_cable.diagnostics['dispatch_method']}")
+    print(f"double-cable Vm probes: {double_cable.Vm.shape}")
+    print(f"double-cable gate names: {list(double_cable.signal(axs.signals.GATES))}")
 
 
 if __name__ == "__main__":

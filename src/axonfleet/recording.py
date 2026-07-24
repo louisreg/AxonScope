@@ -10,6 +10,7 @@ from axonfleet.signals import (
     CONDUCTANCES,
     CURRENTS,
     GATES,
+    MARKOV_OCCUPANCIES,
     MEMBRANE_VOLTAGE,
     STATE_VARIABLES,
     Signal,
@@ -49,6 +50,7 @@ class RecordingPlan:
 
     voltage: bool
     gates: bool
+    markov_occupancies: bool
     currents: bool
     conductances: bool
     state_variables: bool
@@ -74,6 +76,7 @@ class RecordingPlan:
 
         return bool(
             self.gates
+            or self.markov_occupancies
             or self.currents
             or self.conductances
             or self.state_variables
@@ -146,6 +149,7 @@ def _signals_from_flags(
     *,
     voltage: bool,
     gates: bool,
+    markov_occupancies: bool,
     currents: bool,
     conductances: bool,
     state_variables: bool,
@@ -155,6 +159,8 @@ def _signals_from_flags(
         signals.append(MEMBRANE_VOLTAGE)
     if gates:
         signals.append(GATES)
+    if markov_occupancies:
+        signals.append(MARKOV_OCCUPANCIES)
     if currents:
         signals.append(CURRENTS)
     if conductances:
@@ -192,6 +198,7 @@ class Recording:
 
     voltage: bool = True
     gates: bool = False
+    markov_occupancies: bool = False
     currents: bool = False
     conductances: bool = False
     state_variables: bool = False
@@ -208,6 +215,7 @@ class Recording:
         *,
         voltage: bool = True,
         gates: bool = False,
+        markov_occupancies: bool = False,
         currents: bool = False,
         conductances: bool = False,
         state_variables: bool = False,
@@ -245,6 +253,7 @@ class Recording:
             selected = set(normalized_signals)
             voltage = MEMBRANE_VOLTAGE in selected
             gates = GATES in selected
+            markov_occupancies = MARKOV_OCCUPANCIES in selected
             currents = CURRENTS in selected
             conductances = CONDUCTANCES in selected
             state_variables = STATE_VARIABLES in selected
@@ -252,6 +261,7 @@ class Recording:
             normalized_signals = _signals_from_flags(
                 voltage=bool(voltage),
                 gates=bool(gates),
+                markov_occupancies=bool(markov_occupancies),
                 currents=bool(currents),
                 conductances=bool(conductances),
                 state_variables=bool(state_variables),
@@ -278,6 +288,7 @@ class Recording:
 
         object.__setattr__(self, "voltage", bool(voltage))
         object.__setattr__(self, "gates", bool(gates))
+        object.__setattr__(self, "markov_occupancies", bool(markov_occupancies))
         object.__setattr__(self, "currents", bool(currents))
         object.__setattr__(self, "conductances", bool(conductances))
         object.__setattr__(self, "state_variables", bool(state_variables))
@@ -306,6 +317,7 @@ class Recording:
         return cls(
             voltage=True,
             gates=True,
+            markov_occupancies=True,
             currents=True,
             conductances=True,
             state_variables=True,
@@ -364,6 +376,7 @@ class Recording:
 
         return bool(
             self.gates
+            or self.markov_occupancies
             or self.currents
             or self.conductances
             or self.state_variables
@@ -375,6 +388,7 @@ class Recording:
         return RecordingPlan(
             voltage=self.voltage,
             gates=self.gates,
+            markov_occupancies=self.markov_occupancies,
             currents=self.currents,
             conductances=self.conductances,
             state_variables=self.state_variables,

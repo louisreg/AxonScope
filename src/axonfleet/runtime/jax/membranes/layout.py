@@ -68,7 +68,9 @@ class HeterogeneousMembraneModel:
         self.backend = layout.build_backend()
         self.dtype = self.backend.dtype
         self.q10 = self.models[0].q10
+        self._gate_state_names = _unique_names(self.models, "gate_state_names")
         self._gate_names = _unique_names(self.models, "gate_names")
+        self._occupancy_names = _unique_names(self.models, "occupancy_names")
         self._conductance_names = _unique_names(self.models, "conductance_names")
         self._current_names = _unique_names(self.models, "current_names")
 
@@ -101,6 +103,12 @@ class HeterogeneousMembraneModel:
 
     def gate_names(self) -> tuple[str, ...]:
         return self._gate_names
+
+    def gate_state_names(self) -> tuple[str, ...]:
+        return self._gate_state_names
+
+    def occupancy_names(self) -> tuple[str, ...]:
+        return self._occupancy_names
 
     def conductance_names(self) -> tuple[str, ...]:
         return self._conductance_names
@@ -251,10 +259,29 @@ class HeterogeneousMembraneModel:
         name_to_col = {name: i for i, name in enumerate(self._gate_names)}
         for i, model in enumerate(self.models):
             n_g = self.backend.gate_sizes[i]
-            if n_g == 0:
+            if n_g == 0 or not model.gate_names():
                 continue
+            local_gates = gates[i : i + 1, :n_g]
+            local_state = model.gate_trace_matrix(
+                local_gates,
+                (),
+                None if V_mV is None else V_mV[i : i + 1],
+            )[0]
             for local_idx, name in enumerate(model.gate_names()):
-                out = out.at[i, name_to_col[name]].set(gates[i, local_idx])
+                out = out.at[i, name_to_col[name]].set(local_state[local_idx])
+        return out
+
+    def occupancy_trace_matrix(self, gates: jnp.ndarray) -> jnp.ndarray:
+        out = self._empty_trace(len(self._occupancy_names))
+        name_to_col = {name: i for i, name in enumerate(self._occupancy_names)}
+        for i, model in enumerate(self.models):
+            names = model.occupancy_names()
+            if not names:
+                continue
+            n_g = self.backend.gate_sizes[i]
+            local_values = model.occupancy_trace_matrix(gates[i : i + 1, :n_g])[0]
+            for local_idx, name in enumerate(names):
+                out = out.at[i, name_to_col[name]].set(local_values[local_idx])
         return out
 
     def conductance_trace_matrix(

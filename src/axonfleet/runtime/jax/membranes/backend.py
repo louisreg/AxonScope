@@ -229,7 +229,7 @@ class UniformMembraneBackend:
         if nx < 1:
             raise ValueError(f"nx must be >= 1, got {nx}.")
         executable = membrane_backend_model(ion_channel)
-        n_gates = len(executable.gate_names())
+        n_gates = len(executable.gate_state_names())
         n_channels = int(executable.g_bar.shape[0])
         return cls(
             ion_channel=executable,
@@ -351,7 +351,7 @@ class HeterogeneousMembraneBackend:
             sizes = sizes_by_signature.get(signature)
             if sizes is None:
                 sizes = (
-                    len(model.gate_names()),
+                    len(model.gate_state_names()),
                     int(model.g_bar.shape[0]),
                 )
                 sizes_by_signature[signature] = sizes

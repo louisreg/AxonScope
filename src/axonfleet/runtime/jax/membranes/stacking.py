@@ -159,7 +159,7 @@ def try_stack_gated_leak_membrane_from_group(
         background_rows = np.ascontiguousarray(
             unique_background[membrane_rows.row_parameter_indices]
         )
-    gated_gate_count = len(gated_model.gate_names())
+    gated_gate_count = len(gated_model.gate_state_names())
     gated_channel_count = int(gated_model.g_bar.shape[0])
     parameter_names = tuple(sorted(encoded_rows[0].parameter_values))
     if any(
@@ -245,7 +245,7 @@ def _encode_gated_leak_group_row(
             compiled = compiled_by_signature.get(signature)
             if compiled is not None:
                 executable = membrane_backend_model(compiled)
-                if executable.gate_names():
+                if executable.gate_state_names():
                     member = _gated_leak_member(
                         executable,
                         dtype=np_dtype,
@@ -306,7 +306,7 @@ def _encode_gated_leak_group_row(
         or gated_parameter_values is None
     ):
         return None
-    gated_gate_count = len(gated_model.gate_names())
+    gated_gate_count = len(gated_model.gate_state_names())
     leak_g_col = int(gated_gate_count)
     leak_ge_col = int(gated_gate_count) + 1
     gated_mask_col = int(gated_gate_count) + 2
@@ -448,7 +448,7 @@ def _gated_leak_member(
 
     if model.membrane_state_specs():
         return None
-    gate_count = len(model.gate_names())
+    gate_count = len(model.gate_state_names())
     if gate_count > 0:
         if not model.supports_stateless_vm_only_fast_path():
             return None

@@ -123,6 +123,7 @@ class MembraneRecordingOutputExplanation:
     """Public recording names produced by a membrane model."""
 
     gates: tuple[str, ...]
+    markov_occupancies: tuple[str, ...]
     currents: tuple[str, ...]
     conductances: tuple[str, ...]
     states: tuple[str, ...]
@@ -212,7 +213,15 @@ def explain(model: MembraneModel) -> MembraneModelExplanation:
         model_kind=membrane.kind,
         components=_component_explanations(membrane),
         recording_outputs=MembraneRecordingOutputExplanation(
-            gates=public_names(program.gate_names),
+            gates=public_names(
+                program.gate_names[: len(program.hh_gate_state_names)]
+                + program.gate_names[len(program.gate_state_names) :]
+            ),
+            markov_occupancies=public_names(
+                program.gate_names[
+                    len(program.hh_gate_state_names) : len(program.gate_state_names)
+                ]
+            ),
             currents=program.current_names,
             conductances=program.conductance_names,
             states=public_names(program.membrane_state_display_names),
@@ -982,6 +991,7 @@ def _format_components(components: tuple[MembraneComponentExplanation, ...]) -> 
 def _format_recording_outputs(recording: MembraneRecordingOutputExplanation) -> str:
     groups = (
         ("gates", recording.gates, ()),
+        ("markov_occupancies", recording.markov_occupancies, ()),
         ("currents", recording.currents, recording.current_aggregates),
         ("conductances", recording.conductances, recording.conductance_aggregates),
         ("states", recording.states, ()),

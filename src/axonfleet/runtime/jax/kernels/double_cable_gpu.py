@@ -21,6 +21,10 @@ from .double_cable_linear import (
     prepare_double_cable_linear_system_static_terms_xb,
 )
 from .inputs import _record_vm_batch
+from .dense_recording import (
+    empty_recording_matrix_batch,
+    record_matrix_batch,
+)
 
 
 _GPU_DOUBLE_CABLE_BLOCK_SOLVER = "jax_triton_loop_xb"
@@ -99,6 +103,11 @@ def _use_batch_native_double_cable_integrated_solver(
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "record_gates",
+        "record_occupancies",
+        "record_currents",
+        "record_conductances",
+        "record_states",
         "tiled_thomas_block_b",
     ),
 )
@@ -109,6 +118,11 @@ def _run_double_cable_batch_stateful_integrated_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    record_gates: bool,
+    record_occupancies: bool,
+    record_currents: bool,
+    record_conductances: bool,
+    record_states: bool,
     tiled_thomas_block_b: int,
     Vi0_mV: Array,
     Ve0_mV: Array,
@@ -312,12 +326,64 @@ def _run_double_cable_batch_stateful_integrated_scan(
         )
         Vm_new = Vi_new - Ve_new
 
-        output = _record_vm_batch(
+        vm_output = _record_vm_batch(
             Vm_new,
             record_indices,
             record_full=record_full,
         )
         if stateless_vm_only:
+            output = (
+                vm_output,
+                {
+                    "gates": (
+                        record_matrix_batch(
+                            membrane.gate_trace_matrix(gates_pred, extra, Vm_new),
+                            record_indices,
+                            record_full=record_full,
+                        )
+                        if record_gates
+                        else empty_recording_matrix_batch(Vm_new)
+                    ),
+                    "occupancies": (
+                        record_matrix_batch(
+                            membrane.occupancy_trace_matrix(gates_pred),
+                            record_indices,
+                            record_full=record_full,
+                        )
+                        if record_occupancies
+                        else empty_recording_matrix_batch(Vm_new)
+                    ),
+                    "currents": (
+                        record_matrix_batch(
+                            membrane.ionic_current_trace_matrix(
+                                Vm_new, gates_pred, extra
+                            ),
+                            record_indices,
+                            record_full=record_full,
+                        )
+                        if record_currents
+                        else empty_recording_matrix_batch(Vm_new)
+                    ),
+                    "conductances": (
+                        record_matrix_batch(
+                            membrane.conductance_trace_matrix(gates_pred, extra),
+                            record_indices,
+                            record_full=record_full,
+                        )
+                        if record_conductances
+                        else empty_recording_matrix_batch(Vm_new)
+                    ),
+                    "states": (
+                        record_matrix_batch(
+                            membrane.membrane_state_trace_matrix(extra),
+                            record_indices,
+                            record_full=record_full,
+                        )
+                        if record_states
+                        else empty_recording_matrix_batch(Vm_new)
+                    ),
+                },
+            )
             return (Vi_new, Ve_new, gates_pred, *extra), output
 
         gates_new = batch_final_gate_update(gates, Vm, Vm_new, gates_pred)
@@ -337,6 +403,58 @@ def _run_double_cable_batch_stateful_integrated_scan(
             gates_new,
             extra,
             step_plan,
+        )
+        output = (
+            vm_output,
+            {
+                "gates": (
+                    record_matrix_batch(
+                        membrane.gate_trace_matrix(gates_new, state_new, Vm_new),
+                        record_indices,
+                        record_full=record_full,
+                    )
+                    if record_gates
+                    else empty_recording_matrix_batch(Vm_new)
+                ),
+                "occupancies": (
+                    record_matrix_batch(
+                        membrane.occupancy_trace_matrix(gates_new),
+                        record_indices,
+                        record_full=record_full,
+                    )
+                    if record_occupancies
+                    else empty_recording_matrix_batch(Vm_new)
+                ),
+                "currents": (
+                    record_matrix_batch(
+                        membrane.ionic_current_trace_matrix(
+                            Vm_new, gates_new, state_new
+                        ),
+                        record_indices,
+                        record_full=record_full,
+                    )
+                    if record_currents
+                    else empty_recording_matrix_batch(Vm_new)
+                ),
+                "conductances": (
+                    record_matrix_batch(
+                        membrane.conductance_trace_matrix(gates_new, state_new),
+                        record_indices,
+                        record_full=record_full,
+                    )
+                    if record_conductances
+                    else empty_recording_matrix_batch(Vm_new)
+                ),
+                "states": (
+                    record_matrix_batch(
+                        membrane.membrane_state_trace_matrix(state_new),
+                        record_indices,
+                        record_full=record_full,
+                    )
+                    if record_states
+                    else empty_recording_matrix_batch(Vm_new)
+                ),
+            },
         )
         return (Vi_new, Ve_new, gates_new, *state_new), output
 
@@ -379,7 +497,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
         final_carry[1],
         final_carry[2],
         tuple(final_carry[3:]),
-        jnp.swapaxes(trace, 0, 1),
+        jax.tree.map(lambda values: jnp.swapaxes(values, 0, 1), trace),
     )
 
 @partial(

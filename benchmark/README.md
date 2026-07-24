@@ -164,9 +164,13 @@ python benchmark/campaigns/time_chunk_sweep.py \
   --preset quick \
   --platform cpu \
   --policies default,unchunked,50,250,500 \
-  --recordings full_vm,probe_vm,observer_only \
+  --recordings full_recording,full_vm,probe_vm,observer_only \
   --output benchmark/results/time_chunk_sweep
 ```
+
+`full_recording` uses the public `Recording.full()` contract, including all
+membrane quantities exposed by each model. `full_vm` retains voltage only;
+`observer_only` retains compact solver-side observations without dense Vm.
 
 Typed double-cable policy matrix:
 

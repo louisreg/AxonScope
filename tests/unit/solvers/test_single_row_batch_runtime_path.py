@@ -151,3 +151,106 @@ def test_dense_observable_recording_does_not_fall_back_to_scalar_route():
         for values in result.recordings[group].values():
             assert np.asarray(values).shape == (nt, nx)
             assert np.all(np.isfinite(np.asarray(values)))
+
+
+def test_dense_observable_recording_uses_double_cable_batch_route():
+    axon = AxonInstance(
+        axs.axons.MRG(
+            diameter=5.7 * axs.um,
+            nodes=3,
+            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+        )
+    )
+    nt = simulation_step_count(0.1, 0.05)
+
+    result = _run_public(
+        axon,
+        tsim=0.1,
+        dt=0.05,
+        recording=axs.Recording.full(),
+    )
+
+    assert result.diagnostics["dispatch_method"] == "batch-double-cable"
+    assert result.recordings is not None
+    assert set(result.recordings) == {"Vm", "gates", "currents", "conductances"}
+    assert result.Vm.shape[0] == nt
+    for group in ("gates", "currents", "conductances"):
+        assert result.recordings[group]
+        for values in result.recordings[group].values():
+            assert np.asarray(values).shape == result.Vm.shape
+            assert np.all(np.isfinite(np.asarray(values)))
+
+
+def test_double_cable_gates_only_recording_keeps_requested_probes():
+    axon = AxonInstance(
+        axs.axons.MRG(
+            diameter=5.7 * axs.um,
+            nodes=3,
+            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+        )
+    )
+
+    result = _run_public(
+        axon,
+        tsim=0.1,
+        dt=0.05,
+        recording=axs.Recording.probes(axs.signals.GATES, count=3),
+    )
+
+    assert result.recordings is not None
+    assert set(result.recordings) == {"gates"}
+    with pytest.raises(ValueError, match="does not contain a Vm recording"):
+        _ = result.Vm
+    for values in result.signal(axs.signals.GATES).values():
+        assert np.asarray(values).shape == (2, 3)
+
+
+def test_markov_occupancies_are_distinct_from_hh_gates():
+    template = axs.axons.MRGLikeDoubleCableTemplate(
+        diameter=5.7 * axs.um,
+        nodes=3,
+    )
+    defaults = template.default_membranes()
+    markov_node = axs.membranes.Composite(
+        {
+            "mrg_k_leak": axs.membranes.AxNode(
+                gnapbar=0.0 * axs.mS_per_cm2,
+                gnabar=0.0 * axs.mS_per_cm2,
+            ),
+            "nav11": axs.membranes.Nav11(
+                gbar=11_900.0 * axs.mS_per_cm2,
+                ena=50.0 * axs.mV,
+            ),
+        }
+    )
+    axon = AxonInstance(
+        axs.axons.MRG(
+            diameter=5.7 * axs.um,
+            nodes=3,
+            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            membranes=axs.membranes.SectionLayout(
+                node=markov_node,
+                mysa=defaults.membrane_for("MYSA"),
+                flut=defaults.membrane_for("FLUT"),
+                stin=defaults.membrane_for("STIN"),
+            ),
+        )
+    )
+
+    result = _run_public(
+        axon,
+        tsim=0.1,
+        dt=0.05,
+        recording=axs.Recording.full(),
+    )
+
+    gates = result.signal(axs.signals.GATES)
+    occupancies = result.signal(axs.signals.MARKOV_OCCUPANCIES)
+    assert occupancies
+    assert set(gates).isdisjoint(occupancies)
+    assert any("nav11" in name for name in occupancies)
+    for values in occupancies.values():
+        array = np.asarray(values)
+        assert array.shape == result.Vm.shape
+        assert np.all(np.isfinite(array))
+        assert np.all((array >= 0.0) & (array <= 1.0))

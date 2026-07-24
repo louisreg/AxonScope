@@ -1240,6 +1240,8 @@ def _dense_activation_window(
 def _recording_policy(options: dict[str, Any]) -> Any:
     if options["recording"] == "observer_only":
         return axs.Recording.none()
+    if options["recording"] == "full_recording":
+        return axs.Recording.full()
     if options["recording"] == "full_vm":
         return axs.Recording.voltage()
     if options["spatial_recording"] == "center":

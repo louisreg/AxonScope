@@ -374,8 +374,33 @@ class JaxMembraneProgram:
             parameters=parameters,
         )
 
+    def gate_state_names(self) -> tuple[str, ...]:
+        """Return all solver-carried HH and kinetic state names."""
+
+        count = len(self.generated_contract.gate_state_names)
+        return self._public_names(self.generated_contract.gate_names[:count])
+
     def gate_names(self) -> tuple[str, ...]:
-        return self._public_names(self.generated_contract.gate_names)
+        """Return HH gates and derived gating observables exposed as gates."""
+
+        hh_count = len(self.generated_contract.hh_gate_state_names)
+        state_count = len(self.generated_contract.gate_state_names)
+        names = (
+            self.generated_contract.gate_names[:hh_count]
+            + self.generated_contract.gate_names[state_count:]
+        )
+        return self._public_names(names)
+
+    def occupancy_names(self) -> tuple[str, ...]:
+        """Return Markov occupancy-state names."""
+
+        hh_count = len(self.generated_contract.hh_gate_state_names)
+        kinetic_count = len(self.generated_contract.kinetic_state_names)
+        return self._public_names(
+            self.generated_contract.gate_names[
+                hh_count : hh_count + kinetic_count
+            ]
+        )
 
     def conductance_names(self) -> tuple[str, ...]:
         return self.generated_contract.conductance_names
@@ -432,14 +457,30 @@ class JaxMembraneProgram:
         state: tuple[jnp.ndarray, ...] = (),
         V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
-        base = jnp.asarray(gates, dtype=self.dtype)
+        all_states = jnp.asarray(gates, dtype=self.dtype)
+        hh_count = len(self.generated_contract.hh_gate_state_names)
+        base = all_states[:, :hh_count]
         if not self._gate_trace_observable_names:
             return base
         extras = [
-            self.lowering.observable_matrix(name, base, V_mV=V_mV, state=state)
+            self.lowering.observable_matrix(
+                name,
+                all_states,
+                V_mV=V_mV,
+                state=state,
+            )
             for name in self._gate_trace_observable_names
         ]
         return jnp.concatenate([base, jnp.stack(extras, axis=1)], axis=1)
+
+    def occupancy_trace_matrix(self, gates: jnp.ndarray) -> jnp.ndarray:
+        """Return the kinetic-state slice of the solver gate matrix."""
+
+        hh_count = len(self.generated_contract.hh_gate_state_names)
+        kinetic_count = len(self.generated_contract.kinetic_state_names)
+        return jnp.asarray(gates, dtype=self.dtype)[
+            :, hh_count : hh_count + kinetic_count
+        ]
 
     def ionic_current_trace_matrix(
         self,

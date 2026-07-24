@@ -215,7 +215,10 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--nx", type=int)
     parser.add_argument("--n-axons", type=int)
     parser.add_argument("--precision", choices=("fp32", "fp64"))
-    parser.add_argument("--recording", choices=("full_vm", "probe_vm", "observer_only"))
+    parser.add_argument(
+        "--recording",
+        choices=("full_recording", "full_vm", "probe_vm", "observer_only"),
+    )
     parser.add_argument("--cable", choices=("single_cable", "double_cable"), default="single_cable")
     parser.add_argument(
         "--double-cable-block-solver",

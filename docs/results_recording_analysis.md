@@ -64,6 +64,8 @@ axs.Recording.voltage()
 axs.Recording.center(axs.signals.Vm)
 axs.Recording.probes(axs.signals.Vm, count=8)
 axs.Recording.indices([0, 5, 10], axs.signals.Vm)
+axs.Recording.only(axs.signals.GATES, axs.signals.MARKOV_OCCUPANCIES)
+axs.Recording.full()
 ```
 
 Signals are descriptors, not a closed enum. Built-in descriptors live under
@@ -71,8 +73,12 @@ Signals are descriptors, not a closed enum. Built-in descriptors live under
 and `axs.identifiers.SignalId` for future workflows that produce new result
 channels.
 
-`Recording.full()` and observable descriptors such as `axs.signals.GATES` are
-valid policy objects, but current public execution supports Vm outputs only.
+The canonical single- and double-cable batch paths record membrane voltage,
+HH gates, Markov occupancies, ionic and aggregate current densities,
+conductance densities, and auxiliary states. `Recording.full()` requests every
+group exposed by the selected membrane model. Markov occupancies are separate
+from HH gates in public results even though the solver carries both in one
+compact state matrix.
 
 `positions` must carry length units and is stored internally as `positions_um`.
 `sample_dt` must carry time units and is stored internally as `sample_dt_ms`.

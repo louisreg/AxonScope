@@ -126,7 +126,7 @@ def test_matrix_free_conserved_step_matches_dense_on_random_valid_graphs(
     rtol = 8e-5 if dtype is np.float32 else 2e-12
     atol = 2e-6 if dtype is np.float32 else 2e-13
 
-    with jax.enable_x64(dtype is np.float64):
+    with jax.experimental.enable_x64(dtype is np.float64):
         jax_dtype = jnp.float64 if dtype is np.float64 else jnp.float32
         transitions = _random_valid_transitions(
             rng=rng,

@@ -76,10 +76,13 @@ def main() -> None:
         stimulated(markov),
         duration=4.0 * axs.ms,
         dt=0.005 * axs.ms,
+        recording=axs.Recording.full(),
     ).run().single
 
     distal = reference.node_position(-2, unit=axs.um)
     print(markov_node.explain().format())
+    occupancies = markov_result.signal(axs.signals.MARKOV_OCCUPANCIES)
+    print(f"recorded Markov occupancies: {list(occupancies)}")
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
     reference_result.plot_trace(
         ax=axes[0],

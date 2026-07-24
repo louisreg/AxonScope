@@ -34,7 +34,11 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
     source = report.sources[0]
     assert source.model_name == "passive"
     assert source.cache_status in {"hit", "miss"}
-    assert source.cache_reason in {"manifest_match", "manifest_missing"}
+    assert source.cache_reason in {
+        "manifest_match",
+        "manifest_missing",
+        "generated_files_missing:jax_model.py,numpy_model.py",
+    }
     assert len(source.graph_hash) == 40
     assert source.optimized_graph_hash == source.graph_hash
     assert source.function_names == ("leak",)

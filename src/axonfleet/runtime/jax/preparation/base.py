@@ -39,6 +39,7 @@ from axonfleet.runtime.jax.types import (
 def membrane_observable_names(membrane: Any) -> dict[str, tuple[str, ...]]:
     return {
         "gates": membrane.gate_names(),
+        "occupancies": membrane.occupancy_names(),
         "currents": membrane.current_names(),
         "conductances": membrane.conductance_names(),
         "states": membrane.membrane_state_names(),

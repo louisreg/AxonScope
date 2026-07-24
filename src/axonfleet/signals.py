@@ -54,6 +54,13 @@ GATES: Signal[float] = Signal(
     description="Membrane gating variables.",
     quantity_type=float,
 )
+MARKOV_OCCUPANCIES: Signal[float] = Signal(
+    id=SignalId("markov_occupancies"),
+    result_key="occupancies",
+    unit=None,
+    description="Markov-state occupancy probabilities.",
+    quantity_type=float,
+)
 CURRENTS: Signal[float] = Signal(
     id=SignalId("currents"),
     result_key="currents",
@@ -84,6 +91,7 @@ __all__ = [
     "SignalSelection",
     "MEMBRANE_VOLTAGE",
     "GATES",
+    "MARKOV_OCCUPANCIES",
     "CURRENTS",
     "CONDUCTANCES",
     "STATE_VARIABLES",

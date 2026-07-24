@@ -287,7 +287,7 @@ def prove_block_elimination(
 ) -> ProofResult:
     """Compare staged production solves with one assembled direct-sum solve."""
     rng = np.random.default_rng(seed + (0 if cable == "single" else 100))
-    with jax.enable_x64(True):
+    with jax.experimental.enable_x64(True):
         proofs = [
             _one_axon_proof(
                 rng,

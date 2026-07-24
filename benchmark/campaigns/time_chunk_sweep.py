@@ -22,7 +22,7 @@ from benchmark.workloads.curve_options import PRESETS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICIES = ("default", "unchunked", "128", "256", "512", "1024")
-RECORDING_MODES = ("full_vm", "probe_vm", "observer_only")
+RECORDING_MODES = ("full_recording", "full_vm", "probe_vm", "observer_only")
 DEFAULT_CABLES = ("single_cable", "double_cable")
 
 SUMMARY_FIELDS = (
@@ -166,8 +166,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--recordings",
         action="append",
         help=(
-            "Comma-separated recording modes to sweep: full_vm, probe_vm, "
-            "observer_only. When omitted, the preset/script default is used "
+            "Comma-separated recording modes to sweep: full_recording, full_vm, "
+            "probe_vm, observer_only. When omitted, the preset/script default is used "
             "unless --recording is set."
         ),
     )

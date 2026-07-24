@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, cast
+from typing import Any, Callable, cast
 
 import jax.numpy as jnp
 
@@ -39,6 +39,12 @@ from .factorized import (
     _factorized_current_mid_rows,
     _single_cable_factorized_forcing_footprint,
 )
+from .dense_recording import (
+    DenseRecordedTrace,
+    concat_recording_chunks,
+    recording_output_flags,
+    recordings_for_plan,
+)
 from .inputs import (
     _as_cached_batched_scalar_or_space_array,
     _as_cached_batched_space_array,
@@ -64,11 +70,6 @@ from .single_cable_scans import (
     _run_single_cable_vstim_batch_stateful_scan,
     _run_single_cable_zero_vstim_batch_sparse_observer_scan,
 )
-
-
-class _RecordedTrace(NamedTuple):
-    Vm: Array
-    recordings: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -185,7 +186,7 @@ class SingleCableVStimBatchKernel:
                 options.recording.mode != "none"
                 and (recording_plan is None or recording_plan.voltage)
             )
-            record_outputs = _recording_output_flags(recording_plan)
+            record_outputs = recording_output_flags(recording_plan)
             chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
             stateless_vm_only = bool(
                 membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
@@ -285,7 +286,7 @@ class SingleCableVStimBatchKernel:
             return BatchKernelResult(
                 Vm=out.Vm if record_voltage else None,
                 t=grid.t_vec_ms,
-                recordings=_recordings_for_plan(
+                recordings=recordings_for_plan(
                     recording_plan,
                     out,
                     observable_names=membrane_runtime.observable_names,
@@ -318,7 +319,7 @@ class SingleCableVStimBatchKernel:
         return BatchKernelResult(
             Vm=out.Vm if record_voltage else None,
             t=grid.t_vec_ms,
-            recordings=_recordings_for_plan(
+            recordings=recordings_for_plan(
                 recording_plan,
                 out,
                 observable_names=membrane_runtime.observable_names,
@@ -338,7 +339,7 @@ def _run_single_cable_vstim_batch_array_chunks(
     time_chunk_steps: int | None,
     record_outputs: dict[str, bool],
     progress_callback: Callable[[int, int], None] | None,
-) -> _RecordedTrace:
+) -> DenseRecordedTrace:
     membrane_runtime = runtime.membrane
     grid = runtime.grid
     cable = runtime.cable
@@ -418,6 +419,7 @@ def _run_single_cable_vstim_batch_array_chunks(
                 stateless_vm_only=stateless_vm_only,
                 record_full=record_full,
                 record_gates=record_outputs["gates"],
+                record_occupancies=record_outputs["occupancies"],
                 record_currents=record_outputs["currents"],
                 record_conductances=record_outputs["conductances"],
                 record_states=record_outputs["states"],
@@ -452,9 +454,12 @@ def _run_single_cable_vstim_batch_array_chunks(
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
-    return _RecordedTrace(
+    return DenseRecordedTrace(
         Vm=_concat_trace_chunks(chunks),
-        recordings=_concat_recording_chunks(recording_chunks),
+        recordings=concat_recording_chunks(
+            recording_chunks,
+            concat=_concat_trace_chunks,
+        ),
     )
 
 def _run_single_cable_factorized_vstim_batch_array_chunks(
@@ -470,7 +475,7 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
     time_chunk_steps: int | None,
     record_outputs: dict[str, bool],
     progress_callback: Callable[[int, int], None] | None,
-) -> _RecordedTrace:
+) -> DenseRecordedTrace:
     membrane_runtime = runtime.membrane
     grid = runtime.grid
     cable = runtime.cable
@@ -559,6 +564,7 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
                 stateless_vm_only=stateless_vm_only,
                 record_full=record_full,
                 record_gates=record_outputs["gates"],
+                record_occupancies=record_outputs["occupancies"],
                 record_currents=record_outputs["currents"],
                 record_conductances=record_outputs["conductances"],
                 record_states=record_outputs["states"],
@@ -594,9 +600,12 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
-    return _RecordedTrace(
+    return DenseRecordedTrace(
         Vm=_concat_trace_chunks(chunks),
-        recordings=_concat_recording_chunks(recording_chunks),
+        recordings=concat_recording_chunks(
+            recording_chunks,
+            concat=_concat_trace_chunks,
+        ),
     )
 
 def _run_single_cable_factorized_vstim_batch_observer_chunks(
@@ -1478,78 +1487,3 @@ def _initial_single_cable_batch_state(
             for values in membrane_runtime.state0
         )
         return Vm, gates, state
-
-
-def _recording_output_flags(plan: RecordingPlan | None) -> dict[str, bool]:
-    return {
-        "gates": bool(plan is not None and plan.gates),
-        "currents": bool(plan is not None and plan.currents),
-        "conductances": bool(plan is not None and plan.conductances),
-        "states": bool(plan is not None and plan.state_variables),
-    }
-
-
-def _concat_recording_chunks(
-    chunks: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    if not chunks:
-        return None
-    names = tuple(chunks[0])
-    out: dict[str, Any] = {}
-    for name in names:
-        out[name] = _concat_trace_chunks([chunk[name] for chunk in chunks])
-    return out
-
-
-def _recording_group(
-    values: Any,
-    names: tuple[str, ...],
-) -> dict[str, Any]:
-    return {
-        name: values[..., index]
-        for index, name in enumerate(names)
-        if index < int(values.shape[-1])
-    }
-
-
-def _recordings_for_plan(
-    plan: RecordingPlan | None,
-    trace: _RecordedTrace,
-    *,
-    observable_names: dict[str, tuple[str, ...]],
-) -> dict[str, Any] | None:
-    if plan is None:
-        return {"Vm": trace.Vm}
-    recordings: dict[str, Any] = {}
-    if plan.voltage:
-        recordings["Vm"] = trace.Vm
-    if trace.recordings is not None:
-        if plan.gates:
-            group = _recording_group(
-                trace.recordings["gates"],
-                observable_names.get("gates", ()),
-            )
-            if group:
-                recordings["gates"] = group
-        if plan.currents:
-            group = _recording_group(
-                trace.recordings["currents"],
-                observable_names.get("currents", ()),
-            )
-            if group:
-                recordings["currents"] = group
-        if plan.conductances:
-            group = _recording_group(
-                trace.recordings["conductances"],
-                observable_names.get("conductances", ()),
-            )
-            if group:
-                recordings["conductances"] = group
-        if plan.state_variables:
-            group = _recording_group(
-                trace.recordings["states"],
-                observable_names.get("states", ()),
-            )
-            if group:
-                recordings["states"] = group
-    return recordings or None

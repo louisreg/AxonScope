@@ -47,6 +47,7 @@ from axonfleet.solvers import BatchOptions
 
 _RECORDING_GROUPS = (
     ("gates", "gates"),
+    ("markov_occupancies", "occupancies"),
     ("currents", "currents"),
     ("conductances", "conductances"),
     ("state_variables", "states"),

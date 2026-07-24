@@ -908,11 +908,6 @@ def _enqueue_double_cable_batch_group(
     preparation_cache: Any,
 ) -> PendingJaxBatchGroup:
     """Enqueue a homogeneous double-cable group through full double-cable batching."""
-    if recording_plan is not None and recording_plan.wants_observables:
-        raise NotImplementedError(
-            "dense observable recording is implemented for single-cable batch groups first."
-        )
-
     prepared = _prepare_jax_batch_group(
         group,
         tsim_ms=tsim_ms,
@@ -1026,6 +1021,7 @@ def _enqueue_double_cable_batch_group(
             ),
             options=kernel_options,
             observers=observer_plan,
+            recording_plan=recording_plan,
             progress_callback=progress_callback,
             benchmark_observer_state_scope=benchmark_observer_state_scope,
             require_compact_factorized_extracellular=require_factorized_extracellular,

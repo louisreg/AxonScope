@@ -24,6 +24,7 @@ from axonfleet.runtime.jax.recording.observer import (
 from axonfleet.runtime.jax.policy.engine_types import JaxSolverEngine
 from axonfleet.runtime.jax.types import SolverRuntime
 from axonfleet.solvers.options import BatchOptions
+from axonfleet.recording import RecordingPlan
 
 from .chunking import (
     _combine_threshold_observer_chunk_states,
@@ -39,6 +40,12 @@ from .chunking import (
 from .factorized import (
     _factorized_current_initial_previous_rows,
     _factorized_current_mid_rows,
+)
+from .dense_recording import (
+    DenseRecordedTrace,
+    concat_recording_chunks,
+    recording_output_flags,
+    recordings_for_plan,
 )
 from .inputs import (
     _as_batched_edge_array,
@@ -175,6 +182,7 @@ class DoubleCableBatchKernel:
         intracellular_current_density_mid: Array | None = None,
         options: BatchOptions | None = None,
         observers: ThresholdObserverPlan | None = None,
+        recording_plan: RecordingPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         benchmark_observer_state_scope: str | None = None,
         require_compact_factorized_extracellular: bool = False,
@@ -262,6 +270,11 @@ class DoubleCableBatchKernel:
 
             options = _normalize_batch_options(options)
             record_idx, record_full = _resolve_output_recording(options, nx=nx)
+            record_voltage = (
+                options.recording.mode != "none"
+                and (recording_plan is None or recording_plan.voltage)
+            )
+            record_outputs = recording_output_flags(recording_plan)
             chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
             has_driven_extracellular = bool(self.has_driven_extracellular)
             stateless_vm_only = bool(
@@ -331,10 +344,19 @@ class DoubleCableBatchKernel:
             extracellular_potential_initial_previous_mV=cast(Any, vext_previous_batch),
             record_indices=record_idx,
             record_full=record_full,
+            record_outputs=record_outputs,
             time_chunk_steps=chunk_steps,
             progress_callback=progress_callback,
         )
-        return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
+        return BatchKernelResult(
+            Vm=out.Vm if record_voltage else None,
+            t=grid.t_vec_ms,
+            recordings=recordings_for_plan(
+                recording_plan,
+                out,
+                observable_names=membrane_runtime.observable_names,
+            ),
+        )
 
 
 def _effective_double_cable_platform(solver_engine: JaxSolverEngine) -> str:
@@ -354,9 +376,10 @@ def _run_double_cable_batch_array_chunks(
     extracellular_potential_initial_previous_mV: Array | None,
     record_indices: Array,
     record_full: bool,
+    record_outputs: dict[str, bool],
     time_chunk_steps: int | None,
     progress_callback: Callable[[int, int], None] | None,
-) -> Array:
+) -> DenseRecordedTrace:
     membrane_runtime = runtime.membrane
     extracellular = runtime.extracellular
     if extracellular is None:
@@ -436,7 +459,8 @@ def _run_double_cable_batch_array_chunks(
     )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size)
     previous = extracellular_potential_initial_previous_mV
-    chunks = []
+    vm_chunks = []
+    recording_chunks: list[dict[str, Any]] = []
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
@@ -503,6 +527,11 @@ def _run_double_cable_batch_array_chunks(
                     has_driven_extracellular=has_driven_extracellular,
                     stateless_vm_only=stateless_vm_only,
                     record_full=record_full,
+                    record_gates=record_outputs["gates"],
+                    record_occupancies=record_outputs["occupancies"],
+                    record_currents=record_outputs["currents"],
+                    record_conductances=record_outputs["conductances"],
+                    record_states=record_outputs["states"],
                     tiled_thomas_block_b=kernel_tiled_thomas_block_b,
                     Vi0_mV=Vi,
                     Ve0_mV=Ve,
@@ -537,6 +566,11 @@ def _run_double_cable_batch_array_chunks(
                     has_driven_extracellular=has_driven_extracellular,
                     stateless_vm_only=stateless_vm_only,
                     record_full=record_full,
+                    record_gates=record_outputs["gates"],
+                    record_occupancies=record_outputs["occupancies"],
+                    record_currents=record_outputs["currents"],
+                    record_conductances=record_outputs["conductances"],
+                    record_states=record_outputs["states"],
                     Vi0_mV=Vi,
                     Ve0_mV=Ve,
                     gates0=gates,
@@ -580,11 +614,19 @@ def _run_double_cable_batch_array_chunks(
             else:
                 assert vext_chunk is not None
                 previous = vext_chunk[:, -1]
-            chunks.append(trace)
+            vm_trace, recording_trace = trace
+            vm_chunks.append(vm_trace)
+            recording_chunks.append(recording_trace)
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
-    return _concat_trace_chunks(chunks)
+    return DenseRecordedTrace(
+        Vm=_concat_trace_chunks(vm_chunks),
+        recordings=concat_recording_chunks(
+            recording_chunks,
+            concat=_concat_trace_chunks,
+        ),
+    )
 
 def _prepare_double_cable_batch_arrays(
     *,

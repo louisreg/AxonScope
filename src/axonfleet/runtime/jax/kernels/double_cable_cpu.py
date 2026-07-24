@@ -16,6 +16,7 @@ from axonfleet.runtime.jax.recording.observer import (
 from .block_tridiagonal import solve_block_tridiagonal_2x2_scalar
 from ..cable_geometry import Array
 from .inputs import _record_vm_row
+from .dense_recording import empty_recording_matrix, record_matrix
 
 
 def _factorized_current_previous(
@@ -79,6 +80,11 @@ def _factorized_extracellular_drive(
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "record_gates",
+        "record_occupancies",
+        "record_currents",
+        "record_conductances",
+        "record_states",
     ),
 )
 def _run_double_cable_batch_stateful_scan(
@@ -88,6 +94,11 @@ def _run_double_cable_batch_stateful_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    record_gates: bool,
+    record_occupancies: bool,
+    record_currents: bool,
+    record_conductances: bool,
+    record_states: bool,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
@@ -330,10 +341,62 @@ def _run_double_cable_batch_stateful_scan(
             Vm_new = Vi_new - Ve_new
 
             if stateless_vm_only:
-                output = _record_vm_row(
+                vm_output = _record_vm_row(
                     Vm_new,
                     record_indices_row,
                     record_full=record_full,
+                )
+                output = (
+                    vm_output,
+                    {
+                        "gates": (
+                            record_matrix(
+                                membrane.gate_trace_matrix(gates_pred, extra, Vm_new),
+                                record_indices_row,
+                                record_full=record_full,
+                            )
+                            if record_gates
+                            else empty_recording_matrix(Vm_new)
+                        ),
+                        "occupancies": (
+                            record_matrix(
+                                membrane.occupancy_trace_matrix(gates_pred),
+                                record_indices_row,
+                                record_full=record_full,
+                            )
+                            if record_occupancies
+                            else empty_recording_matrix(Vm_new)
+                        ),
+                        "currents": (
+                            record_matrix(
+                                membrane.ionic_current_trace_matrix(
+                                    Vm_new, gates_pred, extra
+                                ),
+                                record_indices_row,
+                                record_full=record_full,
+                            )
+                            if record_currents
+                            else empty_recording_matrix(Vm_new)
+                        ),
+                        "conductances": (
+                            record_matrix(
+                                membrane.conductance_trace_matrix(gates_pred, extra),
+                                record_indices_row,
+                                record_full=record_full,
+                            )
+                            if record_conductances
+                            else empty_recording_matrix(Vm_new)
+                        ),
+                        "states": (
+                            record_matrix(
+                                membrane.membrane_state_trace_matrix(extra),
+                                record_indices_row,
+                                record_full=record_full,
+                            )
+                            if record_states
+                            else empty_recording_matrix(Vm_new)
+                        ),
+                    },
                 )
                 return (Vi_new, Ve_new, gates_pred, *extra), output
 
@@ -368,10 +431,62 @@ def _run_double_cable_batch_stateful_scan(
                 step_plan=step_plan,
                 dt=dt_ms,
             )
-            output = _record_vm_row(
+            vm_output = _record_vm_row(
                 Vm_new,
                 record_indices_row,
                 record_full=record_full,
+            )
+            output = (
+                vm_output,
+                {
+                    "gates": (
+                        record_matrix(
+                            membrane.gate_trace_matrix(gates_new, state_new, Vm_new),
+                            record_indices_row,
+                            record_full=record_full,
+                        )
+                        if record_gates
+                        else empty_recording_matrix(Vm_new)
+                    ),
+                    "occupancies": (
+                        record_matrix(
+                            membrane.occupancy_trace_matrix(gates_new),
+                            record_indices_row,
+                            record_full=record_full,
+                        )
+                        if record_occupancies
+                        else empty_recording_matrix(Vm_new)
+                    ),
+                    "currents": (
+                        record_matrix(
+                            membrane.ionic_current_trace_matrix(
+                                Vm_new, gates_new, state_new
+                            ),
+                            record_indices_row,
+                            record_full=record_full,
+                        )
+                        if record_currents
+                        else empty_recording_matrix(Vm_new)
+                    ),
+                    "conductances": (
+                        record_matrix(
+                            membrane.conductance_trace_matrix(gates_new, state_new),
+                            record_indices_row,
+                            record_full=record_full,
+                        )
+                        if record_conductances
+                        else empty_recording_matrix(Vm_new)
+                    ),
+                    "states": (
+                        record_matrix(
+                            membrane.membrane_state_trace_matrix(state_new),
+                            record_indices_row,
+                            record_full=record_full,
+                        )
+                        if record_states
+                        else empty_recording_matrix(Vm_new)
+                    ),
+                },
             )
             return (Vi_new, Ve_new, gates_new, *state_new), output
 

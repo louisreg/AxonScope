@@ -1009,6 +1009,7 @@ def _observable_output_items(
     result: list[MemoryEstimateItem] = []
     for attr_name, item_name in (
         ("gates", "outputs.gates"),
+        ("markov_occupancies", "outputs.occupancies"),
         ("currents", "outputs.currents"),
         ("conductances", "outputs.conductances"),
         ("state_variables", "outputs.states"),
@@ -1049,6 +1050,7 @@ def _observable_group_counts(
 ) -> dict[str, int]:
     wanted = {
         "gates": bool(recording.gates),
+        "markov_occupancies": bool(recording.markov_occupancies),
         "currents": bool(recording.currents),
         "conductances": bool(recording.conductances),
         "state_variables": bool(recording.state_variables),
@@ -1058,6 +1060,10 @@ def _observable_group_counts(
         for model in item.solver_axon.membrane_models:
             if wanted["gates"]:
                 names["gates"].update(_call_name_tuple(model, "gate_names"))
+            if wanted["markov_occupancies"]:
+                names["markov_occupancies"].update(
+                    _call_name_tuple(model, "occupancy_names")
+                )
             if wanted["currents"]:
                 names["currents"].update(_call_name_tuple(model, "current_names"))
             if wanted["conductances"]:

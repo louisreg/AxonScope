@@ -58,7 +58,7 @@ def find_threshold(
     progress: bool | str = False,
     solver_progress: bool | str = False,
 ) -> ThresholdPlan:
-    """Describe a lazy per-row threshold search for :meth:`axonfleet.Runner.run`."""
+    """Describe a lazy per-row threshold search for canonical execution."""
 
     base_pool = tuple(pool)
     if not base_pool:

@@ -7,7 +7,7 @@ in the phase audits and `benchmark/README.md`, not in this checklist.
 
 ## Snapshot
 
-Updated on 2026-07-23 during the P19 source and public-surface audit.
+Updated on 2026-07-24 during the P21 recording and membrane-introspection work.
 
 - P7, P11, P12, the VmRaster part of P13, and P14-P18 are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; CUDA
@@ -18,8 +18,8 @@ Updated on 2026-07-23 during the P19 source and public-surface audit.
 - Compact activation, latency, spike-count, bounded spike-time, and VmRaster
   observers are available. Dense recording remains a separate memory/performance
   concern.
-- P19A, P19B, and P20 are closed. P19C is intentionally deferred; later
-  phases remain future architecture or product expansion.
+- P19A, P19B, and P20 are closed. P19C is intentionally deferred. P21 is
+  active; later phases remain future architecture or product expansion.
 
 ## Non-Negotiables
 
@@ -226,6 +226,12 @@ Updated on 2026-07-23 during the P19 source and public-surface audit.
   concept documentation from the canonical public surface.
 - [ ] Write the indexed notebook mini-course under `examples/tutorials/` and
   keep it aligned with the runnable Python learning path.
+- [ ] Re-review every basic, advanced, integration, and tutorial example as one
+  didactic curriculum. Verify concept order, scientific motivation, naming,
+  comments, plots, runtime cost, expected outputs, and consistency with the
+  canonical API; remove or merge examples that are redundant, misleading,
+  overly implementation-oriented, or no longer earn their place. Keep
+  `README.md`, `examples/README.md`, notebooks, and runnable scripts aligned.
 - [ ] Prepare the CI/CD pipeline for supported Python versions, CPU unit tests,
   packaging/build checks, documentation, optional GPU validation, release
   artifacts, and protected publication credentials.
@@ -317,7 +323,7 @@ not a wrapper or a parallel optimized route.
   Remove paths, names, builders, wrappers, fallbacks, or cache owners made
   unused or redundant by P20, then rerun the proportional validation gates.
 
-### Full Recording And Membrane Introspection
+### P21 - Full Recording And Membrane Introspection
 
 - [ ] Benchmark dense/full Vm recording separately from VmRaster and define a
   justified chunk policy without changing the established VmRaster default
@@ -331,6 +337,16 @@ not a wrapper or a parallel optimized route.
   `estimate()` and preserve one result model on CPU and GPU.
 - [ ] Add didactic examples and CPU/GPU numerical tests for retained membrane
   values, including mixed HH/Markov compositions and overflow/retention cases.
+- [ ] Extend `tests/nrv` for every retained NRV-backed membrane family so the
+  canonical recording path validates gates, ionic and aggregate currents,
+  conductances, auxiliary states, and Markov occupancies where the reference
+  exposes them. Compare initialization and time traces under matched voltage
+  clamp, intracellular, and extracellular conditions; document unit, sign,
+  density/total-current, area, and naming conversions instead of weakening
+  tolerances around definition mismatches.
+- [ ] Run the extended NRV recording campaign on CPU and GPU where applicable,
+  require CPU/GPU equivalence for AxonFleet outputs, and retain fresh artifacts
+  before considering the recording/introspection phase complete.
 
 ### Independent Reference Validation
 
