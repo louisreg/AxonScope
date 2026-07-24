@@ -43,6 +43,8 @@ class MembraneProgram:
     gate_names: tuple[str, ...]
     membrane_state_display_names: tuple[str, ...]
     observable_display_names: tuple[str, ...]
+    recorded_conductance_observable_names: tuple[str, ...]
+    recorded_conductance_names: tuple[str, ...]
     raw_current_names: tuple[str, ...]
     raw_conductance_names: tuple[str, ...]
     current_names: tuple[str, ...]
@@ -111,6 +113,24 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
         )
         for observable in model.observables
     )
+    recorded_conductance_indices = tuple(
+        index
+        for index, observable in enumerate(model.observables)
+        if observable.quantity.unit == CONDUCTANCE_DENSITY_MS_CM2
+    )
+    recorded_conductance_observable_names = tuple(
+        model.observables[index].name for index in recorded_conductance_indices
+    )
+    recorded_conductance_names = tuple(
+        (
+            observable_display_names.get(observable.name, observable.name)
+            if observable_display_names
+            else observable.name
+        )
+        for observable in (
+            model.observables[index] for index in recorded_conductance_indices
+        )
+    )
     raw_current_names = tuple(current.name for current in model.currents)
     raw_conductance_names = tuple(
         _conductance_name(name) for name in raw_current_names
@@ -141,6 +161,8 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
         gate_names=(*public_gate_state_names, *public_gate_trace_observable_names),
         membrane_state_display_names=public_membrane_state_names,
         observable_display_names=public_observable_names,
+        recorded_conductance_observable_names=recorded_conductance_observable_names,
+        recorded_conductance_names=recorded_conductance_names,
         raw_current_names=raw_current_names,
         raw_conductance_names=raw_conductance_names,
         current_names=current_groups.names,

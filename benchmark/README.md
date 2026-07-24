@@ -29,6 +29,8 @@ The registered scripts are:
 - `with_nrv_examples`: executable gate for with-NRV example 01;
 - `runner_group_scheduling`: runner grouping and scheduling costs;
 - `runner_plan_validation`: P20 lazy-plan and local Runner CPU/GPU acceptance;
+- `membrane_recording_validation`: canonical full-recording CPU/GPU numerical
+  equivalence for HH, stateful Schild/Tigerholm, and mixed MRG+Markov models;
 - `recruitment_amplitude_batch`: realistic amplitude batching and reuse;
 - `single_cable_triton_gate`: focused single-cable Triton acceptance gate;
 - `membrane_temporal`: complete temporal membrane/cable workloads;

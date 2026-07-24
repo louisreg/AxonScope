@@ -143,9 +143,10 @@ def test_dense_observable_recording_does_not_fall_back_to_scalar_route():
         "I_l",
     }
     assert set(result.signal(axs.signals.CONDUCTANCES)) == {
-        "g_na",
-        "g_k",
-        "g_l",
+        "hodgkin_huxley.g_na",
+        "hodgkin_huxley.g_k",
+        "hodgkin_huxley.g_l",
+        "passive.g_l",
     }
     for group in ("gates", "currents", "conductances"):
         for values in result.recordings[group].values():

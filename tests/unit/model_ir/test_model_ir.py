@@ -1682,7 +1682,19 @@ def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
         "I_k",
         "I_k",
     ]
-    assert [observable.name for observable in model.observables] == ["g_na", "g_k", "w_kna"]
+    assert [observable.name for observable in model.observables] == [
+        "g_nav17",
+        "g_nav18",
+        "g_nav19",
+        "g_ks",
+        "g_kf",
+        "g_kdr",
+        "g_kna",
+        "g_h",
+        "g_na",
+        "g_k",
+        "w_kna",
+    ]
     state_names = [state.name for state in model.states]
     assert all(name in state_names for name in ("nai", "nao", "ki", "ko"))
     assert model.step_program is not None
@@ -1740,7 +1752,21 @@ def test_schild_sources_export_full_calcium_step_program(tmp_path):
             "I_ca",
             "I_ca",
         ]
-        assert [observable.name for observable in model.observables] == ["g_na", "g_k", "g_ca"]
+        assert [observable.name for observable in model.observables] == [
+            "g_leak_na",
+            "g_leak_ca",
+            "g_naf",
+            "g_nas",
+            "g_kd",
+            "g_ka",
+            "g_kds",
+            "g_kca",
+            "g_can",
+            "g_cat",
+            "g_na",
+            "g_k",
+            "g_ca",
+        ]
         assert len(model.gates) == gate_count
         assert model.step_program is not None
         assert model.step_program.prepare_gate_source is LinearizationGateSource.PREVIOUS
@@ -1757,9 +1783,9 @@ def test_schild_sources_export_full_calcium_step_program(tmp_path):
             "cao",
         ]
         assert [diagnostic.name for diagnostic in model.step_program.diagnostics] == [
-            "I_na_total_uAcm2",
-            "I_k_total_uAcm2",
-            "I_ca_total_uAcm2",
+            "I_na",
+            "I_k",
+            "I_ca",
             "I_total_rhs_uAcm2",
         ]
         interpreter = NumpyModelInterpreter(model, dtype=np.float64)
@@ -2379,7 +2405,7 @@ def test_model_ir_step_program_drives_prepare_finalize_and_diagnostics(tmp_path)
                 explicit_outward_current=I_background + bias,
                 correction_current=bias * literal(0.25),
                 linearization_gate_source=LinearizationGateSource.PREVIOUS,
-                diagnostics=(Diagnostic("bias_current", bias, current_quantity),),
+                diagnostics=(Diagnostic("I_aux", bias, current_quantity),),
             ),
         )
     )
@@ -2441,8 +2467,23 @@ def test_model_ir_step_program_drives_prepare_finalize_and_diagnostics(tmp_path)
         rtol=1e-6,
     )
     np.testing.assert_allclose(np.asarray(state_final[0]), np.zeros((2,), dtype=np.float32))
-    assert membrane.diagnostic_names() == ("bias_current",)
+    assert membrane.diagnostic_names() == ("I_aux",)
     np.testing.assert_allclose(np.asarray(diagnostics[0]), expected_current, rtol=1e-6)
+    recorded_currents = membrane.recorded_ionic_current_trace_matrix(
+        V,
+        V + 1.0,
+        gates_prev,
+        gates_new,
+        state0,
+        state_final,
+        plan,
+        I_ion_values,
+    )
+    np.testing.assert_allclose(
+        np.asarray(recorded_currents[:, 0]),
+        expected_current,
+        rtol=1e-6,
+    )
 
     np_plan = interpreter.prepare_membrane_step(
         np.asarray(V),
@@ -2698,7 +2739,12 @@ def test_composite_model_compiles_to_generated_runtime():
         "rattay_aberham.n",
     )
     assert membrane.current_names() == ("I_na", "I_k", "I_l")
-    assert membrane.conductance_names() == ("g_na", "g_k", "g_l")
+    assert membrane.conductance_names() == (
+        "rattay_aberham.g_na",
+        "rattay_aberham.g_k",
+        "rattay_aberham.g_l",
+        "passive.g_l",
+    )
 
     gates = membrane.init_gates(V)
     assert gates.shape == (7, 3)
@@ -2706,7 +2752,9 @@ def test_composite_model_compiles_to_generated_runtime():
     assert membrane.g_bar.shape[0] >= len(membrane.conductance_names())
     assert np.isfinite(np.asarray(membrane.conductances(gates))).all()
     assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
-    assert np.isfinite(np.asarray(membrane.conductance_trace_matrix(gates))).all()
+    assert np.isfinite(
+        np.asarray(membrane.conductance_trace_matrix(gates, V_mV=V))
+    ).all()
     assert np.isfinite(np.asarray(membrane.ionic_current_trace_matrix(V, gates))).all()
 
 

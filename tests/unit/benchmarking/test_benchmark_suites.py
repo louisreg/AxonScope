@@ -71,6 +71,7 @@ def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
         "runner_plan_validation",
         "single_cable_triton_gate",
         "membrane_temporal",
+        "membrane_recording_validation",
         "kinetic_transition_tables",
     }
 

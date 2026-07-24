@@ -76,6 +76,8 @@ class GeneratedMembraneContract:
     gate_names: tuple[str, ...]
     membrane_state_display_names: tuple[str, ...]
     observable_display_names: tuple[str, ...]
+    recorded_conductance_observable_names: tuple[str, ...]
+    recorded_conductance_names: tuple[str, ...]
     raw_current_names: tuple[str, ...]
     current_output_names: tuple[str, ...]
     observable_output_names: tuple[str, ...]
@@ -200,6 +202,10 @@ def load_generated_membrane_contract(
             raw, "membrane_state_display_names"
         ),
         observable_display_names=_string_tuple(raw, "observable_display_names"),
+        recorded_conductance_observable_names=_string_tuple(
+            raw, "recorded_conductance_observable_names"
+        ),
+        recorded_conductance_names=_string_tuple(raw, "recorded_conductance_names"),
         raw_current_names=_string_tuple(raw, "raw_current_names"),
         current_output_names=_string_tuple(raw, "current_output_names"),
         observable_output_names=_string_tuple(raw, "observable_output_names"),
@@ -281,6 +287,14 @@ def load_generated_membrane_contract(
     observable_names = {value.name for value in contract.observables}
     if not set(contract.gate_trace_observable_names).issubset(observable_names):
         raise ValueError("Generated membrane gate observables are inconsistent.")
+    if len(contract.recorded_conductance_observable_names) != len(
+        contract.recorded_conductance_names
+    ):
+        raise ValueError("Generated recorded conductance names are inconsistent.")
+    if not set(contract.recorded_conductance_observable_names).issubset(
+        observable_names
+    ):
+        raise ValueError("Generated recorded conductance observables are inconsistent.")
     if tuple(value.name for value in contract.diagnostics) != contract.diagnostic_names:
         raise ValueError("Generated membrane diagnostic metadata is inconsistent.")
     _validate_name_groups(

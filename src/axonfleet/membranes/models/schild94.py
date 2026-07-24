@@ -329,7 +329,21 @@ class Schild94(Model):
             "I_ca_can",
             "I_ca_cat",
         ),
-        observables=("g_na", "g_k", "g_ca"),
+        observables=(
+            "g_leak_na",
+            "g_leak_ca",
+            "g_naf",
+            "g_nas",
+            "g_kd",
+            "g_ka",
+            "g_kds",
+            "g_kca",
+            "g_can",
+            "g_cat",
+            "g_na",
+            "g_k",
+            "g_ca",
+        ),
         internal=(
             "cai_mid",
             "Oc_mid",
@@ -406,10 +420,33 @@ class Schild94(Model):
         I_ca_can: CurrentDensity = g_can * (Vm - eca_static)
         I_ca_cat: CurrentDensity = g_cat * (Vm - eca_static)
         g_na: ConductanceDensity = g_leak_na + g_naf + g_nas
-        g_k: ConductanceDensity = g_kd + g_ka + g_kds
+        g_k: ConductanceDensity = g_kd + g_ka + g_kds + g_kca
         g_ca: ConductanceDensity = g_leak_ca + g_can + g_cat
-        self.keep(i_kca, g_kca)
-        return I_na_leak, I_ca_leak, I_na_naf, I_na_nas, I_k_kd, I_k_ka, I_k_kds, I_ca_can, I_ca_cat, g_na, g_k, g_ca
+        self.keep(i_kca)
+        return (
+            I_na_leak,
+            I_ca_leak,
+            I_na_naf,
+            I_na_nas,
+            I_k_kd,
+            I_k_ka,
+            I_k_kds,
+            I_ca_can,
+            I_ca_cat,
+            g_leak_na,
+            g_leak_ca,
+            g_naf,
+            g_nas,
+            g_kd,
+            g_ka,
+            g_kds,
+            g_kca,
+            g_can,
+            g_cat,
+            g_na,
+            g_k,
+            g_ca,
+        )
 
 
     @step(
@@ -426,9 +463,9 @@ class Schild94(Model):
         prepare_gate_source="previous",
         linearization_gate_source="previous",
         diagnostics={
-            "I_na_total_uAcm2": "I_na_total",
-            "I_k_total_uAcm2": "I_k_total",
-            "I_ca_total_uAcm2": "I_ca_total",
+            "I_na": "I_na_total",
+            "I_k": "I_k_total",
+            "I_ca": "I_ca_total",
             "I_total_rhs_uAcm2": "I_total_rhs",
         },
     )

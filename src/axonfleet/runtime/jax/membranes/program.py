@@ -403,7 +403,7 @@ class JaxMembraneProgram:
         )
 
     def conductance_names(self) -> tuple[str, ...]:
-        return self.generated_contract.conductance_names
+        return self._public_names(self.generated_contract.recorded_conductance_names)
 
     def current_names(self) -> tuple[str, ...]:
         return self.generated_contract.current_names
@@ -445,11 +445,20 @@ class JaxMembraneProgram:
         self,
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
+        V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
-        return _aggregate_columns(
-            self.conductances(gates, state),
-            self._conductance_groups,
-        )
+        if not self.generated_contract.recorded_conductance_observable_names:
+            return jnp.zeros((gates.shape[0], 0), dtype=self.dtype)
+        values = [
+            self.lowering.observable_matrix(
+                name,
+                gates,
+                V_mV=V_mV,
+                state=state,
+            )
+            for name in self.generated_contract.recorded_conductance_observable_names
+        ]
+        return jnp.stack(values, axis=1)
 
     def gate_trace_matrix(
         self,
@@ -490,6 +499,44 @@ class JaxMembraneProgram:
     ) -> jnp.ndarray:
         raw_currents = self.lowering.current_matrix(V_mV, gates, state=state)
         return _aggregate_columns(raw_currents, self._current_groups)
+
+    def recorded_ionic_current_trace_matrix(
+        self,
+        V_mV_prev: jnp.ndarray,
+        V_mV_new: jnp.ndarray,
+        gates_prev: jnp.ndarray,
+        gates_new: jnp.ndarray,
+        state_prev: tuple[jnp.ndarray, ...],
+        state_new: tuple[jnp.ndarray, ...],
+        step_plan: MembraneStepPlan,
+        I_ion: jnp.ndarray,
+    ) -> jnp.ndarray:
+        """Return canonical currents, replacing groups with declared totals."""
+
+        currents = self.ionic_current_trace_matrix(V_mV_new, gates_new, state_new)
+        diagnostic_names = self.diagnostic_names()
+        replacements = tuple(
+            (self.current_names().index(name), diagnostic_names.index(name))
+            for name in self.current_names()
+            if name in diagnostic_names
+        )
+        if not replacements:
+            return currents
+        diagnostics = self.compute_step_diagnostics(
+            V_mV_prev,
+            V_mV_new,
+            gates_prev,
+            gates_new,
+            state_prev,
+            state_new,
+            step_plan,
+            I_ion,
+        )
+        for current_index, diagnostic_index in replacements:
+            currents = currents.at[:, current_index].set(
+                diagnostics[diagnostic_index]
+            )
+        return currents
 
     def prepare_membrane_step(
         self,

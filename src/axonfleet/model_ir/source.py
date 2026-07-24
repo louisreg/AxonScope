@@ -47,7 +47,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v2"
-SOURCE_COMPILER_VERSION = "source_codegen.v28"
+SOURCE_COMPILER_VERSION = "source_codegen.v30"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _GENERATED_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v5"
 _SIDE_EFFECT_CALLS = {
@@ -3512,6 +3512,10 @@ def _generated_runtime_contract(
         "gate_names": program.gate_names,
         "membrane_state_display_names": program.membrane_state_display_names,
         "observable_display_names": program.observable_display_names,
+        "recorded_conductance_observable_names": (
+            program.recorded_conductance_observable_names
+        ),
+        "recorded_conductance_names": program.recorded_conductance_names,
         "raw_current_names": program.raw_current_names,
         "current_output_names": tuple(
             str(spec["expression"])

@@ -32,7 +32,9 @@ from tests.nrv._helpers import (
     enable_nrv_recordings,
     interp_rows,
     normalize_nrv_matrix,
+    nrv_segment_recording_matrix,
     nrv_trace,
+    record_nrv_segment_variable,
     run_axonfleet_simulation,
     sample_indices_from_position,
     trace_metrics,
@@ -377,6 +379,13 @@ SPECS = [
         state_max_atol=0.0,
         vext_rmse_atol_mV=1.35,
         vext_max_atol_mV=3.3,
+        conductance_pairs=(
+            ("hodgkin_huxley.g_na", "g_na"),
+            ("hodgkin_huxley.g_k", "g_k"),
+            ("hodgkin_huxley.g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.05,
+        conductance_max_atol=0.30,
     ),
     ExtracellularSpec(
         name="rattay",
@@ -399,6 +408,13 @@ SPECS = [
         state_rmse_atol=0.0,
         state_max_atol=0.0,
         gate_max_atol_by_name={"m": 0.32},
+        conductance_pairs=(
+            ("rattay_aberham.g_na", "g_na"),
+            ("rattay_aberham.g_k", "g_k"),
+            ("rattay_aberham.g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.05,
+        conductance_max_atol=0.30,
     ),
     ExtracellularSpec(
         name="sundt",
@@ -422,6 +438,9 @@ SPECS = [
         state_max_atol=0.0,
         gate_rmse_atol_by_name={"m": 0.10},
         gate_max_atol_by_name={"m": 0.50},
+        conductance_pairs=(("g_na", "g_na"), ("g_k", "g_k"), ("g_l", "g_l")),
+        conductance_rmse_atol=0.05,
+        conductance_max_atol=0.30,
     ),
     ExtracellularSpec(
         name="tigerholm",
@@ -462,6 +481,18 @@ SPECS = [
         gate_max_atol=0.25,
         state_rmse_atol=2.0,
         state_max_atol=5.0,
+        conductance_pairs=(
+            ("g_nav17", "g_nav17"),
+            ("g_nav18", "g_nav18"),
+            ("g_nav19", "g_nav19"),
+            ("g_ks", "g_kA"),
+            ("g_kf", "g_kM"),
+            ("g_kdr", "g_kdr"),
+            ("g_kna", "g_kna"),
+            ("g_h", "g_h"),
+        ),
+        conductance_rmse_atol=0.05,
+        conductance_max_atol=0.30,
     ),
     ExtracellularSpec(
         name="schild94",
@@ -493,8 +524,8 @@ SPECS = [
         vm_peak_atol_mV=16.0,
         vm_matrix_rmse_atol_mV=None,
         vm_matrix_corr_min=None,
-        current_rmse_atol=15.0,
-        current_max_atol=50.0,
+        current_rmse_atol=0.03,
+        current_max_atol=0.50,
         gate_rmse_atol=0.12,
         gate_max_atol=0.30,
         state_rmse_atol=0.12,
@@ -502,6 +533,20 @@ SPECS = [
         nrv_key_overrides={"l_naf": "h_nas", "m_nas": "l_naf", "h_nas": "m_nas"},
         vext_rmse_atol_mV=1.8,
         vext_max_atol_mV=5.0,
+        conductance_pairs=(
+            ("g_leak_na", "g_leak_na"),
+            ("g_leak_ca", "g_leak_ca"),
+            ("g_naf", "g_naf"),
+            ("g_nas", "g_nas"),
+            ("g_kd", "g_kd"),
+            ("g_ka", "g_ka"),
+            ("g_kds", "g_kds"),
+            ("g_kca", "g_kca"),
+            ("g_can", "g_can"),
+            ("g_cat", "g_cat"),
+        ),
+        conductance_rmse_atol=0.005,
+        conductance_max_atol=0.02,
     ),
     ExtracellularSpec(
         name="schild97",
@@ -532,14 +577,28 @@ SPECS = [
         vm_peak_atol_mV=16.0,
         vm_matrix_rmse_atol_mV=None,
         vm_matrix_corr_min=None,
-        current_rmse_atol=15.0,
-        current_max_atol=50.0,
+        current_rmse_atol=0.02,
+        current_max_atol=0.20,
         gate_rmse_atol=0.12,
         gate_max_atol=0.30,
         state_rmse_atol=0.12,
         state_max_atol=0.35,
         vext_rmse_atol_mV=1.8,
         vext_max_atol_mV=5.0,
+        conductance_pairs=(
+            ("g_leak_na", "g_leak_na"),
+            ("g_leak_ca", "g_leak_ca"),
+            ("g_naf", "g_naf"),
+            ("g_nas", "g_nas"),
+            ("g_kd", "g_kd"),
+            ("g_ka", "g_ka"),
+            ("g_kds", "g_kds"),
+            ("g_kca", "g_kca"),
+            ("g_can", "g_can"),
+            ("g_cat", "g_cat"),
+        ),
+        conductance_rmse_atol=0.005,
+        conductance_max_atol=0.02,
     ),
     ExtracellularSpec(
         name="mrg",
@@ -548,8 +607,18 @@ SPECS = [
         nrv_factory=_make_mrg_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("axnode.m", "m"),
+            ("axnode.mp", "mp"),
+            ("axnode.h", "h"),
+            ("axnode.s", "s"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=12.0,
         vm_peak_atol_mV=30.0,
@@ -565,7 +634,12 @@ SPECS = [
         gate_max_atol=0.28,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
-        conductance_pairs=(),
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_l", "g_l"),
+        ),
         conductance_rmse_atol=0.20,
         conductance_max_atol=2.0,
         gate_max_atol_by_name={"m": 0.40},
@@ -579,19 +653,42 @@ SPECS = [
         nrv_factory=_make_gaines_motor_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.001,
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_kf", "I_kf"),
+            ("I_q", "I_q"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("gaines_motor_node.m", "m"),
+            ("gaines_motor_node.mp", "mp"),
+            ("gaines_motor_node.h", "h"),
+            ("gaines_motor_node.s", "s"),
+            ("gaines_motor_node.n", "n"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=3.0,
         vm_peak_atol_mV=1.0,
         vm_matrix_rmse_atol_mV=1.25,
         vm_matrix_corr_min=0.99,
-        current_rmse_atol=0.0,
-        current_max_atol=0.0,
-        gate_rmse_atol=0.0,
-        gate_max_atol=0.0,
+        current_rmse_atol=5.0,
+        current_max_atol=240.0,
+        gate_rmse_atol=0.10,
+        gate_max_atol=0.30,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_kf", "g_kf"),
+            ("g_q", "g_q"),
+            ("g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.20,
+        conductance_max_atol=2.0,
     ),
     ExtracellularSpec(
         name="gaines_sensory",
@@ -600,19 +697,42 @@ SPECS = [
         nrv_factory=_make_gaines_sensory_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.001,
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_kf", "I_kf"),
+            ("I_q", "I_q"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("gaines_sensory_node.m", "m"),
+            ("gaines_sensory_node.mp", "mp"),
+            ("gaines_sensory_node.h", "h"),
+            ("gaines_sensory_node.s", "s"),
+            ("gaines_sensory_node.n", "n"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=5.0,
         vm_peak_atol_mV=1.0,
         vm_matrix_rmse_atol_mV=1.25,
         vm_matrix_corr_min=0.99,
-        current_rmse_atol=0.0,
-        current_max_atol=0.0,
-        gate_rmse_atol=0.0,
-        gate_max_atol=0.0,
+        current_rmse_atol=5.0,
+        current_max_atol=240.0,
+        gate_rmse_atol=0.10,
+        gate_max_atol=0.30,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_kf", "g_kf"),
+            ("g_q", "g_q"),
+            ("g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.20,
+        conductance_max_atol=2.0,
     ),
 ]
 
@@ -867,7 +987,26 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
 
     axon_nrv = spec.nrv_factory(float(diameter_um), axon, spec.dt_ms)
     enable_nrv_recordings(axon_nrv)
+    direct_ica = (
+        record_nrv_segment_variable(axon_nrv, "_ref_ica")
+        if spec.name.startswith("schild")
+        else ()
+    )
+    direct_gbna = (
+        record_nrv_segment_variable(axon_nrv, "_ref_gbna_leakSchild")
+        if spec.name.startswith("schild")
+        else ()
+    )
+    direct_gbca = (
+        record_nrv_segment_variable(axon_nrv, "_ref_gbca_leakSchild")
+        if spec.name.startswith("schild")
+        else ()
+    )
     results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)
+    if direct_ica:
+        results_nrv["I_ca"] = nrv_segment_recording_matrix(direct_ica)
+        results_nrv["g_leak_na"] = nrv_segment_recording_matrix(direct_gbna)
+        results_nrv["g_leak_ca"] = nrv_segment_recording_matrix(direct_gbca)
 
     t_as = np.asarray(res.t, dtype=float)
     as_x_um = axonfleet_x_um(axon)

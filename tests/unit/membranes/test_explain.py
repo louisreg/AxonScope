@@ -235,9 +235,9 @@ def test_membrane_explain_reports_stateful_step_program(tmp_path, monkeypatch):
     assert source.step.prepare_gate_source == "previous"
     assert source.step.linearization_gate_source == "previous"
     assert [diagnostic.state for diagnostic in source.step.diagnostics] == [
-        "I_na_total_uAcm2",
-        "I_k_total_uAcm2",
-        "I_ca_total_uAcm2",
+        "I_na",
+        "I_k",
+        "I_ca",
         "I_total_rhs_uAcm2",
     ]
 

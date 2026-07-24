@@ -145,7 +145,7 @@ def test_double_cable_recording_matrices_accept_batched_rows():
             membrane.gate_trace_matrix(local_gates, (), local_voltage),
             membrane.occupancy_trace_matrix(local_gates),
             membrane.ionic_current_trace_matrix(local_voltage, local_gates, ()),
-            membrane.conductance_trace_matrix(local_gates, ()),
+            membrane.conductance_trace_matrix(local_gates, (), local_voltage),
         )
     )(voltage, gates)
 

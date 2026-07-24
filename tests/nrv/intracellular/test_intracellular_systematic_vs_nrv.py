@@ -24,13 +24,16 @@ from axonfleet.axons.unmyelinated import (
 )
 from axonfleet.stimulation import Stimulus
 from tests.nrv._helpers import (
+    AXONFLEET_TO_NRV_CONDUCTANCE_SCALE,
     AXONFLEET_TO_NRV_CURRENT_SCALE,
     align_rows_to_target_x,
     axonfleet_x_um,
     enable_nrv_recordings,
     interp_rows,
     normalize_nrv_matrix,
+    nrv_segment_recording_matrix,
     nrv_trace as interpolate_nrv_trace,
+    record_nrv_segment_variable,
     run_axonfleet_simulation,
     sample_indices_from_position,
     trace_metrics,
@@ -60,6 +63,11 @@ class IntracellularSpec:
     state_max_atol: float
     nrv_only_observables: tuple[str, ...] = ()
     nrv_key_overrides: dict[str, str] | None = None
+    conductance_pairs: tuple[tuple[str, str], ...] = ()
+    conductance_rmse_atol: float = 0.0
+    conductance_max_atol: float = 0.0
+    current_rmse_atol_by_name: dict[str, float] | None = None
+    current_max_atol_by_name: dict[str, float] | None = None
 
 
 def _axonspace_vm_matrix(axon, res, matrix_mode: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -136,6 +144,7 @@ def _plot_intracellular_report(
     sample_as_idx: int,
     metrics_lines: list[str],
     current_pairs: list[tuple[str, np.ndarray, np.ndarray]],
+    conductance_pairs: list[tuple[str, np.ndarray, np.ndarray]],
     gate_pairs: list[tuple[str, np.ndarray, np.ndarray]],
     state_pairs: list[tuple[str, np.ndarray, np.ndarray]],
 ) -> Path:
@@ -144,7 +153,7 @@ def _plot_intracellular_report(
     as_x = axonfleet_x_um(axon)
     vm_local_as = np.asarray(res.Vm, dtype=float)[:, sample_as_idx]
 
-    fig, axs = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
+    fig, axs = plt.subplots(4, 2, figsize=(16, 18), constrained_layout=True)
 
     axs[0, 0].plot(t_as, vm_local_as, lw=2.0, zorder=2, label="AxonFleet")
     axs[0, 0].plot(t_as, vm_local_nrv, "--", lw=2.2, zorder=4, label="NRV")
@@ -208,7 +217,29 @@ def _plot_intracellular_report(
     if current_pairs:
         ax_curr.legend(fontsize=8, ncol=2)
 
-    ax_states = axs[2, 0]
+    ax_cond = axs[2, 0]
+    if conductance_pairs:
+        for i, (label, as_trace, nrv_trace) in enumerate(conductance_pairs):
+            color = plt.cm.tab20(i % 20)
+            ax_cond.plot(t_as, as_trace, color=color, lw=1.8, label=f"{label} AS")
+            ax_cond.plot(
+                t_as,
+                nrv_trace,
+                color=color,
+                lw=2.0,
+                ls="--",
+                label=f"{label} NRV",
+            )
+    else:
+        ax_cond.text(0.5, 0.5, "No conductance comparison", ha="center", va="center")
+    ax_cond.set_title("Local ionic conductances")
+    ax_cond.set_xlabel("Time [ms]")
+    ax_cond.set_ylabel("Conductance density [S/cm²]")
+    ax_cond.grid(True, alpha=0.3)
+    if conductance_pairs:
+        ax_cond.legend(fontsize=8, ncol=2)
+
+    ax_states = axs[2, 1]
     merged_pairs = gate_pairs + state_pairs
     if merged_pairs:
         for i, (label, as_trace, nrv_trace) in enumerate(merged_pairs):
@@ -239,8 +270,9 @@ def _plot_intracellular_report(
     if merged_pairs:
         ax_states.legend(fontsize=7, ncol=2)
 
-    axs[2, 1].axis("off")
-    axs[2, 1].text(
+    axs[3, 0].axis("off")
+    axs[3, 1].axis("off")
+    axs[3, 0].text(
         0.01,
         0.99,
         "\n".join(metrics_lines),
@@ -264,7 +296,12 @@ def _plot_intracellular_report(
 
 def _run_intracellular_spec(spec: IntracellularSpec) -> None:
     axon = spec.axonfleet_factory()
-    record_observables = bool(spec.current_pairs or spec.gate_pairs or spec.state_pairs)
+    record_observables = bool(
+        spec.current_pairs
+        or spec.conductance_pairs
+        or spec.gate_pairs
+        or spec.state_pairs
+    )
     res = run_axonfleet_simulation(
         axon,
         tsim=spec.tsim_ms,
@@ -277,7 +314,26 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
 
     axon_nrv = spec.nrv_factory(axon, spec.dt_ms)
     enable_nrv_recordings(axon_nrv)
+    direct_ica = (
+        record_nrv_segment_variable(axon_nrv, "_ref_ica")
+        if spec.name.startswith("schild")
+        else ()
+    )
+    direct_gbna = (
+        record_nrv_segment_variable(axon_nrv, "_ref_gbna_leakSchild")
+        if spec.name.startswith("schild")
+        else ()
+    )
+    direct_gbca = (
+        record_nrv_segment_variable(axon_nrv, "_ref_gbca_leakSchild")
+        if spec.name.startswith("schild")
+        else ()
+    )
     results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)
+    if direct_ica:
+        results_nrv["I_ca"] = nrv_segment_recording_matrix(direct_ica)
+        results_nrv["g_leak_na"] = nrv_segment_recording_matrix(direct_gbna)
+        results_nrv["g_leak_ca"] = nrv_segment_recording_matrix(direct_gbca)
 
     t_as = np.asarray(res.t, dtype=float)
     vm_as_matrix, as_x_um, _ = _axonspace_vm_matrix(axon, res, spec.matrix_mode)
@@ -317,15 +373,49 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
             f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f} "
             f"best_lag={best_lag:+d} ({best_lag_rmse:8.4f})"
         )
-        if not (rmse < spec.current_rmse_atol):
+        rmse_atol = (spec.current_rmse_atol_by_name or {}).get(
+            as_name, spec.current_rmse_atol
+        )
+        max_atol = (spec.current_max_atol_by_name or {}).get(
+            as_name, spec.current_max_atol
+        )
+        if not (rmse < rmse_atol):
             failures.append(
-                f"{spec.name} {as_name} RMSE {rmse:.4f} > {spec.current_rmse_atol:.4f}"
+                f"{spec.name} {as_name} RMSE {rmse:.4f} > {rmse_atol:.4f}"
             )
-        if not (max_abs < spec.current_max_atol):
+        if not (max_abs < max_atol):
             failures.append(
-                f"{spec.name} {as_name} max |Δ| {max_abs:.4f} > {spec.current_max_atol:.4f}"
+                f"{spec.name} {as_name} max |Δ| {max_abs:.4f} > {max_atol:.4f}"
             )
         current_plot_pairs.append((as_name, as_trace, nrv_trace))
+
+    conductance_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for as_name, nrv_name in spec.conductance_pairs:
+        as_trace = AXONFLEET_TO_NRV_CONDUCTANCE_SCALE * _recorded_trace(
+            res, "conductances", as_name, sample_as_idx
+        )
+        nrv_trace = interpolate_nrv_trace(
+            results_nrv,
+            _resolve_nrv_key(spec, nrv_name),
+            sample_nrv_idx,
+            t_as,
+        )
+        rmse, max_abs, q99_abs = trace_metrics(nrv_trace, as_trace)
+        metrics_lines.append(
+            f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} "
+            f"max={max_abs:8.4f}"
+        )
+        if not (rmse < spec.conductance_rmse_atol):
+            failures.append(
+                f"{spec.name} {as_name} conductance RMSE {rmse:.4f} > "
+                f"{spec.conductance_rmse_atol:.4f}"
+            )
+        if not (max_abs < spec.conductance_max_atol):
+            failures.append(
+                f"{spec.name} {as_name} conductance max |Δ| {max_abs:.4f} > "
+                f"{spec.conductance_max_atol:.4f}"
+            )
+        conductance_plot_pairs.append((as_name, as_trace, nrv_trace))
 
     gate_plot_pairs: list[tuple[str, np.ndarray, np.ndarray]] = []
     for as_name, nrv_name in spec.gate_pairs:
@@ -382,6 +472,7 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
         sample_as_idx,
         metrics_lines,
         current_plot_pairs,
+        conductance_plot_pairs,
         gate_plot_pairs,
         state_plot_pairs,
     )
@@ -650,6 +741,13 @@ SPECS = [
         gate_max_atol=0.15,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        conductance_pairs=(
+            ("hodgkin_huxley.g_na", "g_na"),
+            ("hodgkin_huxley.g_k", "g_k"),
+            ("hodgkin_huxley.g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.01,
+        conductance_max_atol=0.10,
     ),
     IntracellularSpec(
         name="rattay",
@@ -669,6 +767,13 @@ SPECS = [
         gate_max_atol=0.06,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        conductance_pairs=(
+            ("rattay_aberham.g_na", "g_na"),
+            ("rattay_aberham.g_k", "g_k"),
+            ("rattay_aberham.g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.01,
+        conductance_max_atol=0.10,
     ),
     IntracellularSpec(
         name="sundt",
@@ -688,6 +793,9 @@ SPECS = [
         gate_max_atol=0.18,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        conductance_pairs=(("g_na", "g_na"), ("g_k", "g_k"), ("g_l", "g_l")),
+        conductance_rmse_atol=0.01,
+        conductance_max_atol=0.10,
     ),
     IntracellularSpec(
         name="tigerholm",
@@ -727,6 +835,18 @@ SPECS = [
         state_rmse_atol=0.0,
         state_max_atol=0.0,
         nrv_only_observables=("I_ca",),
+        conductance_pairs=(
+            ("g_nav17", "g_nav17"),
+            ("g_nav18", "g_nav18"),
+            ("g_nav19", "g_nav19"),
+            ("g_ks", "g_kA"),
+            ("g_kf", "g_kM"),
+            ("g_kdr", "g_kdr"),
+            ("g_kna", "g_kna"),
+            ("g_h", "g_h"),
+        ),
+        conductance_rmse_atol=0.02,
+        conductance_max_atol=0.10,
     ),
     IntracellularSpec(
         name="schild94",
@@ -767,6 +887,20 @@ SPECS = [
             "m_nas": "l_naf",
             "h_nas": "m_nas",
         },
+        conductance_pairs=(
+            ("g_leak_na", "g_leak_na"),
+            ("g_leak_ca", "g_leak_ca"),
+            ("g_naf", "g_naf"),
+            ("g_nas", "g_nas"),
+            ("g_kd", "g_kd"),
+            ("g_ka", "g_ka"),
+            ("g_kds", "g_kds"),
+            ("g_kca", "g_kca"),
+            ("g_can", "g_can"),
+            ("g_cat", "g_cat"),
+        ),
+        conductance_rmse_atol=0.02,
+        conductance_max_atol=0.15,
     ),
     IntracellularSpec(
         name="schild97",
@@ -801,6 +935,20 @@ SPECS = [
         gate_max_atol=0.35,
         state_rmse_atol=0.12,
         state_max_atol=0.35,
+        conductance_pairs=(
+            ("g_leak_na", "g_leak_na"),
+            ("g_leak_ca", "g_leak_ca"),
+            ("g_naf", "g_naf"),
+            ("g_nas", "g_nas"),
+            ("g_kd", "g_kd"),
+            ("g_ka", "g_ka"),
+            ("g_kds", "g_kds"),
+            ("g_kca", "g_kca"),
+            ("g_can", "g_can"),
+            ("g_cat", "g_cat"),
+        ),
+        conductance_rmse_atol=0.02,
+        conductance_max_atol=0.15,
     ),
     IntracellularSpec(
         name="mrg",
@@ -809,18 +957,37 @@ SPECS = [
         tsim_ms=4.0,
         dt_ms=0.005,
         matrix_mode="all",
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("axnode.m", "m"),
+            ("axnode.mp", "mp"),
+            ("axnode.h", "h"),
+            ("axnode.s", "s"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=6.0,
         vm_peak_atol_mV=12.0,
-        current_rmse_atol=0.0,
-        current_max_atol=0.0,
+        current_rmse_atol=0.05,
+        current_max_atol=0.30,
         gate_rmse_atol=0.08,
         gate_max_atol=0.25,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
-        nrv_only_observables=("I_na", "I_nap", "I_k", "I_l"),
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.20,
+        conductance_max_atol=2.0,
+        current_rmse_atol_by_name={"I_na": 1.5},
+        current_max_atol_by_name={"I_na": 25.0},
     ),
     IntracellularSpec(
         name="gaines_motor",
@@ -829,18 +996,42 @@ SPECS = [
         tsim_ms=4.0,
         dt_ms=0.005,
         matrix_mode="all",
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_kf", "I_kf"),
+            ("I_q", "I_q"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("gaines_motor_node.m", "m"),
+            ("gaines_motor_node.mp", "mp"),
+            ("gaines_motor_node.h", "h"),
+            ("gaines_motor_node.s", "s"),
+            ("gaines_motor_node.n", "n"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=0.05,
         vm_peak_atol_mV=0.05,
-        current_rmse_atol=0.0,
-        current_max_atol=0.0,
-        gate_rmse_atol=0.0,
-        gate_max_atol=0.0,
+        current_rmse_atol=0.05,
+        current_max_atol=0.30,
+        gate_rmse_atol=0.08,
+        gate_max_atol=0.25,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
-        nrv_only_observables=("I_na", "I_nap", "I_k", "I_kf", "I_q", "I_l"),
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_kf", "g_kf"),
+            ("g_q", "g_q"),
+            ("g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.20,
+        conductance_max_atol=2.0,
+        current_rmse_atol_by_name={"I_na": 1.5},
+        current_max_atol_by_name={"I_na": 25.0},
     ),
     IntracellularSpec(
         name="gaines_sensory",
@@ -849,18 +1040,42 @@ SPECS = [
         tsim_ms=4.0,
         dt_ms=0.005,
         matrix_mode="all",
-        current_pairs=(),
-        gate_pairs=(),
+        current_pairs=(
+            ("I_na", "I_na"),
+            ("I_nap", "I_nap"),
+            ("I_k", "I_k"),
+            ("I_kf", "I_kf"),
+            ("I_q", "I_q"),
+            ("I_l", "I_l"),
+        ),
+        gate_pairs=(
+            ("gaines_sensory_node.m", "m"),
+            ("gaines_sensory_node.mp", "mp"),
+            ("gaines_sensory_node.h", "h"),
+            ("gaines_sensory_node.s", "s"),
+            ("gaines_sensory_node.n", "n"),
+        ),
         state_pairs=(),
         vm_rmse_atol_mV=0.05,
         vm_peak_atol_mV=0.05,
-        current_rmse_atol=0.0,
-        current_max_atol=0.0,
-        gate_rmse_atol=0.0,
-        gate_max_atol=0.0,
+        current_rmse_atol=0.05,
+        current_max_atol=0.30,
+        gate_rmse_atol=0.08,
+        gate_max_atol=0.25,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
-        nrv_only_observables=("I_na", "I_nap", "I_k", "I_kf", "I_q", "I_l"),
+        conductance_pairs=(
+            ("g_na", "g_na"),
+            ("g_nap", "g_nap"),
+            ("g_k", "g_k"),
+            ("g_kf", "g_kf"),
+            ("g_q", "g_q"),
+            ("g_l", "g_l"),
+        ),
+        conductance_rmse_atol=0.20,
+        conductance_max_atol=2.0,
+        current_rmse_atol_by_name={"I_na": 1.5},
+        current_max_atol_by_name={"I_na": 25.0},
     ),
 ]
 

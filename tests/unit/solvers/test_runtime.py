@@ -114,7 +114,12 @@ def test_prepare_rattay_initial_state_uses_generic_membrane_backend():
 
     assert isinstance(runtime.membrane, JaxMembraneProgram)
     assert runtime.observable_names["currents"] == ("I_na", "I_k", "I_l")
-    assert runtime.observable_names["conductances"] == ("g_na", "g_k", "g_l")
+    assert runtime.observable_names["conductances"] == (
+        "rattay_aberham.g_na",
+        "rattay_aberham.g_k",
+        "rattay_aberham.g_l",
+        "passive.g_l",
+    )
     np.testing.assert_allclose(
         np.asarray(runtime.gates0),
         np.asarray(runtime.membrane.init_gates(runtime.Vm0_mV)),

@@ -300,9 +300,10 @@ class HeterogeneousMembraneModel:
         self,
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
+        V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         if gates.ndim == 3:
-            return jax.vmap(self.conductance_trace_matrix)(gates, state)
+            return jax.vmap(self.conductance_trace_matrix)(gates, state, V_mV)
         _ = state
         out = self._empty_trace(len(self._conductance_names))
         name_to_col = {name: i for i, name in enumerate(self._conductance_names)}
@@ -313,7 +314,11 @@ class HeterogeneousMembraneModel:
                 if n_g > 0
                 else jnp.zeros((1, 0), dtype=self.dtype)
             )
-            local_values = model.conductance_trace_matrix(local_gates)[0]
+            local_voltage = None if V_mV is None else V_mV[i : i + 1]
+            local_values = model.conductance_trace_matrix(
+                local_gates,
+                V_mV=local_voltage,
+            )[0]
             for local_idx, name in enumerate(model.conductance_names()):
                 out = out.at[i, name_to_col[name]].add(local_values[local_idx])
         return out
@@ -340,6 +345,20 @@ class HeterogeneousMembraneModel:
             for local_idx, name in enumerate(model.current_names()):
                 out = out.at[i, name_to_col[name]].add(local_values[local_idx])
         return out
+
+    def recorded_ionic_current_trace_matrix(
+        self,
+        V_mV_prev: jnp.ndarray,
+        V_mV_new: jnp.ndarray,
+        gates_prev: jnp.ndarray,
+        gates_new: jnp.ndarray,
+        state_prev: tuple[jnp.ndarray, ...],
+        state_new: tuple[jnp.ndarray, ...],
+        step_plan: MembraneStepPlan,
+        I_ion: jnp.ndarray,
+    ) -> jnp.ndarray:
+        _ = V_mV_prev, gates_prev, state_prev, step_plan, I_ion
+        return self.ionic_current_trace_matrix(V_mV_new, gates_new, state_new)
 
     def membrane_state_trace_matrix(self, state: tuple[jnp.ndarray, ...]) -> jnp.ndarray:
         _ = state

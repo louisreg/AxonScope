@@ -340,7 +340,19 @@ class Tigerholm(Model):
             "I_k_h",
             "I_k_pump",
         ),
-        observables=("g_na", "g_k", "w_kna"),
+        observables=(
+            "g_nav17",
+            "g_nav18",
+            "g_nav19",
+            "g_ks",
+            "g_kf",
+            "g_kdr",
+            "g_kna",
+            "g_h",
+            "g_na",
+            "g_k",
+            "w_kna",
+        ),
         conductances={
             "I_na_pump": "g_pump_zero",
             "I_k_pump": "g_pump_zero",
@@ -404,7 +416,7 @@ class Tigerholm(Model):
         e_na_dyn: Voltage = rt_over_f * log(nao / nai)
         e_k_dyn: Voltage = rt_over_f * log(ko / ki)
         w_kna: Dimensionless = 0.37 / (1.0 + (38.7 / (nai / (1.0 * mM))) ** 3.5)
-        g_kna_dyn: ConductanceDensity = self.gbar_kna * w_kna
+        g_kna: ConductanceDensity = self.gbar_kna * w_kna
 
         pump_f_nai_dyn: Dimensionless = 1.62 / (
             1.0 + (6.7 / ((nai / (1.0 * mM)) + 8.0)) ** 3
@@ -424,14 +436,14 @@ class Tigerholm(Model):
         I_k_ks: CurrentDensity = g_ks * (Vm - e_k_dyn)
         I_k_kf: CurrentDensity = g_kf * (Vm - e_k_dyn)
         I_k_kdr: CurrentDensity = g_kdr * (Vm - e_k_dyn)
-        I_k_kna: CurrentDensity = g_kna_dyn * (Vm - e_k_dyn)
+        I_k_kna: CurrentDensity = g_kna * (Vm - e_k_dyn)
         I_k_h: CurrentDensity = 0.5 * g_h * (Vm - e_k_dyn)
         i_na_dyn: CurrentDensity = (
             I_na_nav17 + I_na_nav18 + I_na_nav19 + I_na_h + I_na_pump
         )
         i_k_dyn: CurrentDensity = I_k_ks + I_k_kf + I_k_kdr + I_k_kna + I_k_h + I_k_pump
         g_na: ConductanceDensity = g_na_channels + 0.5 * g_h
-        g_k: ConductanceDensity = g_k_without_h + g_kna_dyn + 0.5 * g_h
+        g_k: ConductanceDensity = g_k_without_h + g_kna + 0.5 * g_h
         g_pump_zero: ConductanceDensity = 0.0 * mS / cm2
         e_pump_zero: Voltage = 0.0 * mV
 
@@ -471,6 +483,14 @@ class Tigerholm(Model):
             I_k_kna,
             I_k_h,
             I_k_pump,
+            g_nav17,
+            g_nav18,
+            g_nav19,
+            g_ks,
+            g_kf,
+            g_kdr,
+            g_kna,
+            g_h,
             g_na,
             g_k,
             w_kna,

@@ -23,13 +23,7 @@ def run_axonfleet_simulation(
 
     recording = None
     if record_observables:
-        recording = axs.Recording(
-            voltage=True,
-            gates=True,
-            currents=True,
-            conductances=True,
-            state_variables=True,
-        )
+        recording = axs.Recording.full()
     return axs.AxonSimulation(
         axon,
         duration=tsim,
@@ -64,6 +58,31 @@ def enable_nrv_recordings(axon_nrv) -> None:
     axon_nrv.record_g_mem = True
     if hasattr(axon_nrv, "record_particules"):
         axon_nrv.record_particules = True
+
+
+def record_nrv_segment_variable(axon_nrv, reference: str):
+    """Attach direct NEURON vectors for a segment variable NRV mislabels or omits."""
+
+    import neuron
+
+    recorders = []
+    for section, positions in zip(
+        axon_nrv.unmyelinated_sections,
+        axon_nrv.rec_position_list,
+        strict=True,
+    ):
+        for position in positions:
+            recorders.append(
+                neuron.h.Vector().record(
+                    getattr(section(position), reference),
+                    sec=section,
+                )
+            )
+    return tuple(recorders)
+
+
+def nrv_segment_recording_matrix(recorders) -> np.ndarray:
+    return np.asarray([np.asarray(values, dtype=float) for values in recorders])
 
 
 def normalize_nrv_matrix(values: np.ndarray, t_ms: np.ndarray, x_um: np.ndarray) -> np.ndarray:

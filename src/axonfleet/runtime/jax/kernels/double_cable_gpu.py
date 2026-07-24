@@ -290,7 +290,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 static_gates=None,
                 V_mV=Vm,
                 dt_ms=dt_ms,
-                linearize_previous=has_driven_extracellular,
+                linearize_previous=False,
                 parameters=membrane_parameters,
             )
             linearization_gates = gates_pred
@@ -309,8 +309,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 background_batch,
             )
             linearization_gates = step_plan_pred.linearization_gates
-            if has_driven_extracellular:
-                linearization_gates = gates
             explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
             correction_current_abs = step_plan_pred.correction_current * area_batch
 
@@ -366,7 +364,9 @@ def _run_double_cable_batch_stateful_integrated_scan(
                     ),
                     "conductances": (
                         record_matrix_batch(
-                            membrane.conductance_trace_matrix(gates_pred, extra),
+                            membrane.conductance_trace_matrix(
+                                gates_pred, extra, Vm_new
+                            ),
                             record_indices,
                             record_full=record_full,
                         )
@@ -427,9 +427,16 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 ),
                 "currents": (
                     record_matrix_batch(
-                        membrane.ionic_current_trace_matrix(
-                            Vm_new, gates_new, state_new
-                        ),
+                            membrane.recorded_ionic_current_trace_matrix(
+                                Vm,
+                                Vm_new,
+                                gates,
+                                gates_new,
+                                extra,
+                                state_new,
+                                step_plan,
+                                Iion_new,
+                            ),
                         record_indices,
                         record_full=record_full,
                     )
@@ -438,7 +445,9 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 ),
                 "conductances": (
                     record_matrix_batch(
-                        membrane.conductance_trace_matrix(gates_new, state_new),
+                        membrane.conductance_trace_matrix(
+                            gates_new, state_new, Vm_new
+                        ),
                         record_indices,
                         record_full=record_full,
                     )
@@ -739,7 +748,7 @@ def _run_double_cable_batch_observer_integrated_scan(
                 static_gates=static_scan_gates,
                 V_mV=Vm,
                 dt_ms=dt_ms,
-                linearize_previous=has_driven_extracellular,
+                linearize_previous=False,
                 parameters=membrane_parameters,
             )
             linearization_gates = gates_pred
@@ -758,8 +767,6 @@ def _run_double_cable_batch_observer_integrated_scan(
                 background_batch,
             )
             linearization_gates = step_plan_pred.linearization_gates
-            if has_driven_extracellular:
-                linearization_gates = gates
             explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
             correction_current_abs = step_plan_pred.correction_current * area_batch
 
