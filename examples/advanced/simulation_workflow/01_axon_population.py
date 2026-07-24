@@ -1,11 +1,12 @@
-"""Use AxonPopulation as a first-class cohort.
+"""Use AxonPopulation when concrete instance rows already exist.
 
 Run:
-    python examples/advanced/simulation_workflow/02_axon_population.py
+    python examples/advanced/simulation_workflow/01_axon_population.py
 
-`AxonPopulation` is the explicit public container for cohorts. It stores
-`AxonInstance` rows, preserves order, and can contain one row when a workflow
-should still use population execution.
+Most workflows pass descriptive rows directly to `AxonSimulation`, leaving the
+runner to materialize the population lazily. `AxonPopulation` remains useful
+when an integration already owns concrete `AxonInstance` rows and needs an
+explicit ordered cohort.
 """
 
 from __future__ import annotations

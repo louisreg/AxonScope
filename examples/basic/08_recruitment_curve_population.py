@@ -168,16 +168,18 @@ def main() -> None:
         )
     )
 
-    curve = axs.protocols.recruitment_sweep(
-        population,
-        update=update_point_source_current,
-        values=current_steps,
-        duration=4.0 * axs.ms,
-        dt=0.025 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        progress=True,
-        solver_progress="plain",
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            population,
+            update=update_point_source_current,
+            values=current_steps,
+            duration=4.0 * axs.ms,
+            dt=0.025 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.none(),
+            progress=True,
+            solver_progress="plain",
+        )
     )
 
     print("=== Population ===")

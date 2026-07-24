@@ -12,7 +12,6 @@ from axonfleet import (
     SimulationInspection,
     StudyExecutionError,
     StudyPlan,
-    StudyResult,
     StudyTask,
     Stimulus,
     SolverPolicy,
@@ -102,7 +101,6 @@ def test_public_package_imports_and_typed_values_are_available():
     assert SimulationInspection is not None
     assert StudyExecutionError is not None
     assert StudyPlan is not None
-    assert StudyResult is not None
     assert StudyTask is not None
     assert SolverPolicy(double_cable=runtime.jax.DoubleCableSolver.auto()) is not None
     assert runtime.jax.TiledThomasSolverOptions(block_b=32).block_b == 32

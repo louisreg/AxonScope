@@ -216,7 +216,8 @@ class Runner:
         if isinstance(plan, ThresholdPlan):
             return self._run_threshold(plan, cancellation=cancellation)
         if isinstance(plan, SweepPlan):
-            return self._run_sweep(plan, cancellation=cancellation)
+            with benchmark_span("protocol.sweep"):
+                return self._run_sweep(plan, cancellation=cancellation)
         if isinstance(plan, NumericAxisPlan):
             dispatch_plan = expand_dispatch_plan_for_numeric_axis(
                 self._dispatch_plan(plan.source),
@@ -229,23 +230,6 @@ class Runner:
                 dispatch_plan=self._dispatch_plan(plan),
             )
         raise TypeError(f"Runner cannot execute {type(plan).__name__}.")
-
-    def run_many(
-        self,
-        plans: Sequence[LeafPlan],
-        *,
-        cancellation: CancellationToken | None = None,
-    ) -> tuple[Any, ...]:
-        """Execute plans in order through shared runner-owned state."""
-
-        plan_tuple = tuple(plans)
-        if not plan_tuple:
-            return ()
-        result = self.run(
-            StudyPlan.from_plans(plan_tuple),
-            cancellation=cancellation,
-        )
-        return result.values
 
     def _run_study(
         self,
@@ -655,10 +639,11 @@ class Runner:
 
         source_size = plan.source.expected_rows
         if not plan.values:
-            return PoolSweepResult(
+            result = PoolSweepResult(
                 values=plan.values,
                 observations=np.zeros((0, source_size), dtype=object),
             )
+            return plan.result_factory(result) if plan.result_factory else result
 
         numeric_axis = isinstance(plan.update, NumericAxisUpdate)
         if not numeric_axis and plan.value_batch_size != 1:
@@ -737,10 +722,11 @@ class Runner:
         finally:
             progress_display.close()
 
-        return PoolSweepResult(
+        result = PoolSweepResult(
             values=plan.values,
             observations=np.stack(observation_rows, axis=0),
         )
+        return plan.result_factory(result) if plan.result_factory else result
 
     def _run_threshold(
         self,

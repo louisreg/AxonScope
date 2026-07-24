@@ -235,18 +235,20 @@ def run_waveform(cable: str) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
 def run_threshold(cable: str) -> dict[str, Any]:
     case = CABLE_CASES[cable]
     started = perf_counter()
-    curve = axs.protocols.find_threshold(
-        (build_simulation(cable),),
-        rows=(cable,),
-        update=waveform_update(),
-        bounds=(0.0 * axs.uA, 20.0 * axs.uA),
-        duration=case.duration_ms * axs.ms,
-        dt=case.dt_ms * axs.ms,
-        criterion=activation_criterion(),
-        tolerance=0.1 * axs.uA,
-        relative_tolerance=0.01,
-        max_iterations=12,
-        recording=axs.Recording.none(),
+    curve = axs.Runner().run(
+        axs.protocols.find_threshold(
+            (build_simulation(cable),),
+            rows=(cable,),
+            update=waveform_update(),
+            bounds=(0.0 * axs.uA, 20.0 * axs.uA),
+            duration=case.duration_ms * axs.ms,
+            dt=case.dt_ms * axs.ms,
+            criterion=activation_criterion(),
+            tolerance=0.1 * axs.uA,
+            relative_tolerance=0.01,
+            max_iterations=12,
+            recording=axs.Recording.none(),
+        )
     )
     return {
         "elapsed_s": perf_counter() - started,
@@ -266,16 +268,18 @@ def run_recruitment(cable: str) -> tuple[dict[str, Any], Any]:
     )
     amplitudes = np.asarray(RECRUITMENT_AMPLITUDES_UA) * axs.uA
     started = perf_counter()
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=waveform_update(),
-        values=amplitudes,
-        duration=case.duration_ms * axs.ms,
-        dt=case.dt_ms * axs.ms,
-        criterion=activation_criterion(),
-        recording=axs.Recording.none(),
-        batch_amplitudes=True,
-        amplitude_batch_size=None,
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=waveform_update(),
+            values=amplitudes,
+            duration=case.duration_ms * axs.ms,
+            dt=case.dt_ms * axs.ms,
+            criterion=activation_criterion(),
+            recording=axs.Recording.none(),
+            batch_amplitudes=True,
+            amplitude_batch_size=None,
+        )
     )
     summary = {
         "elapsed_s": perf_counter() - started,

@@ -172,17 +172,19 @@ def main(argv: list[str] | None = None) -> int:
                 memory_trace="rss",
             ):
                 with phases.phase("protocol.recruitment_sweep"):
-                    curve = axs.protocols.recruitment_sweep(
-                        workload["pool"],
-                        update=workload["update"],
-                        values=values,
-                        duration=args.duration_ms * axs.ms,
-                        dt=args.dt_ms * axs.ms,
-                        criterion=workload["criterion"],
-                        recording=axs.Recording.none(),
-                        progress=False,
-                        solver_progress=False,
-                        execution_policy=policy,
+                    curve = axs.Runner().run(
+                        axs.protocols.recruitment_sweep(
+                            workload["pool"],
+                            update=workload["update"],
+                            values=values,
+                            duration=args.duration_ms * axs.ms,
+                            dt=args.dt_ms * axs.ms,
+                            criterion=workload["criterion"],
+                            recording=axs.Recording.none(),
+                            progress=False,
+                            solver_progress=False,
+                            execution_policy=policy,
+                        )
                     )
         execution_end = time.perf_counter_ns()
     finally:

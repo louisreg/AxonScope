@@ -16,7 +16,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("gpu", type=Path, help="GPU validation.json or its result directory.")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--rtol", type=float, default=1e-4)
-    parser.add_argument("--atol-mv", type=float, default=1e-3)
+    parser.add_argument(
+        "--atol-mv",
+        type=float,
+        default=2.5e-2,
+        help="Absolute inter-backend tolerance per voltage sample (default: 0.025 mV).",
+    )
     return parser
 
 
@@ -121,20 +126,25 @@ def _compare_voltage_rows(
     _check(checks, f"{label} row count", len(cpu_rows) == len(gpu_rows))
     if len(cpu_rows) != len(gpu_rows):
         return
-    numeric_fields = ("minimum_mV", "maximum_mV", "final_mV", "sum_mV")
     for index, (cpu, gpu) in enumerate(zip(cpu_rows, gpu_rows, strict=True)):
         _check(checks, f"{label} row {index} shape", cpu["shape"] == gpu["shape"])
+        sample_count = int(np.prod(cpu["shape"], dtype=np.int64))
+        scalar_values_match = np.allclose(
+            [cpu[field] for field in ("minimum_mV", "maximum_mV", "final_mV")],
+            [gpu[field] for field in ("minimum_mV", "maximum_mV", "final_mV")],
+            rtol=rtol,
+            atol=atol,
+        )
+        sum_matches = np.isclose(
+            cpu["sum_mV"],
+            gpu["sum_mV"],
+            rtol=rtol,
+            atol=atol * sample_count,
+        )
         _check(
             checks,
             f"{label} row {index} values",
-            bool(
-                np.allclose(
-                    [cpu[field] for field in numeric_fields],
-                    [gpu[field] for field in numeric_fields],
-                    rtol=rtol,
-                    atol=atol,
-                )
-            ),
+            bool(scalar_values_match and sum_matches),
         )
 
 

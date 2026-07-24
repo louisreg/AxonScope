@@ -29,18 +29,11 @@ from axonfleet.benchmarking import (
     reset_benchmark,
 )
 from axonfleet.identifiers import DriveId
-from axonfleet.inspection import PlanInspection, SimulationInspection
-from axonfleet.performance import PlanEstimate
+from axonfleet.inspection import SimulationInspection
 from axonfleet.population import AxonPopulation
 from axonfleet.plans import (
-    NumericAxisPlan,
-    PopulationPlan,
-    RunnablePlan,
-    SimulationPlan,
     StudyPlan,
     StudyTask,
-    SweepPlan,
-    ThresholdPlan,
 )
 from axonfleet.results import (
     VM_RASTER_OBSERVATION_KEY,
@@ -58,7 +51,6 @@ from axonfleet.runner import (
     PlanCancelledError,
     Runner,
     StudyExecutionError,
-    StudyResult,
 )
 from axonfleet.simulation import AxonSimulation
 from axonfleet.solvers import (
@@ -144,8 +136,6 @@ __all__ = [
     "Stimulus",
     "DriveId",
     "SimulationInspection",
-    "PlanInspection",
-    "PlanEstimate",
     "Device",
     "ExecutionPolicy",
     "PrecisionPolicy",
@@ -153,19 +143,12 @@ __all__ = [
     "AxonInstance",
     "AxonPopulation",
     "AxonSimulation",
-    "NumericAxisPlan",
-    "PopulationPlan",
-    "RunnablePlan",
     "Runner",
     "CancellationToken",
     "PlanCancelledError",
     "StudyPlan",
     "StudyExecutionError",
-    "StudyResult",
     "StudyTask",
-    "SimulationPlan",
-    "SweepPlan",
-    "ThresholdPlan",
     "benchmark",
     "benchmark_report",
     "disable_benchmark",

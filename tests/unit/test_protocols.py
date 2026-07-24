@@ -157,7 +157,7 @@ def _patch_simulation_runner(monkeypatch, runner):
 
     class FakeRunner:
         def _population(self, plan):
-            if isinstance(plan, axs.PopulationPlan):
+            if isinstance(plan, axs.plans.PopulationPlan):
                 source = plan.source
                 if isinstance(source, FakePopulation):
                     return source
@@ -167,7 +167,7 @@ def _patch_simulation_runner(monkeypatch, runner):
             return plan
 
         def run(self, plan):
-            if isinstance(plan, axs.ThresholdPlan):
+            if isinstance(plan, axs.plans.ThresholdPlan):
                 from axonfleet.runner import Runner as RealRunner
 
                 return RealRunner._run_threshold(self, plan, cancellation=None)
@@ -175,7 +175,7 @@ def _patch_simulation_runner(monkeypatch, runner):
                 kwargs = dict(plan.kwargs)
                 kwargs["progress"] = plan.progress
                 return runner(self._population(plan.population).instances, **kwargs)
-            if not isinstance(plan, axs.SweepPlan):
+            if not isinstance(plan, axs.plans.SweepPlan):
                 raise TypeError(type(plan).__name__)
             rows = []
             progress_display = protocol_progress._SweepProgress(plan.progress)
@@ -228,10 +228,11 @@ def _patch_simulation_runner(monkeypatch, runner):
                         )
             finally:
                 progress_display.close()
-            return axs.protocols.PoolSweepResult(
+            result = axs.protocols.PoolSweepResult(
                 values=plan.values,
                 observations=np.asarray(rows),
             )
+            return plan.result_factory(result) if plan.result_factory else result
 
         def _run_leaf(self, plan, *, cancellation):
             del cancellation
@@ -239,9 +240,7 @@ def _patch_simulation_runner(monkeypatch, runner):
 
     for module in (observer_protocols, sweep_protocols, threshold_protocols):
         monkeypatch.setattr(module, "AxonSimulation", FakeAxonSimulation)
-    monkeypatch.setattr(sweep_protocols, "Runner", FakeRunner)
-    monkeypatch.setattr(recruitment_protocols, "Runner", FakeRunner)
-    monkeypatch.setattr(threshold_protocols, "Runner", FakeRunner)
+    monkeypatch.setattr(axs, "Runner", FakeRunner)
     monkeypatch.setattr(runner_module, "AxonPopulation", FakePopulation)
 
 
@@ -359,7 +358,7 @@ def test_recruitment_plan_keeps_typed_waveforms_lazy():
         )
 
     update = axs.protocols.ExtracellularWaveformUpdate(waveform)
-    plan = axs.protocols.recruitment_sweep_plan(
+    plan = axs.protocols.recruitment_sweep(
         pool,
         update=update,
         values=np.asarray([1.0, 2.0, 3.0]) * axs.uA,
@@ -369,7 +368,7 @@ def test_recruitment_plan_keeps_typed_waveforms_lazy():
         recording=axs.Recording.none(),
     )
 
-    assert isinstance(plan, axs.SweepPlan)
+    assert isinstance(plan, axs.plans.SweepPlan)
     assert plan.update is update
     assert plan.source.population.source == pool
     assert plan.expected_rows == 6
@@ -382,7 +381,7 @@ def test_recruitment_plan_validates_current_values_directly():
     update = axs.protocols.ExtracellularWaveformUpdate(lambda value: value)
 
     with pytest.raises(TypeError, match="current"):
-        axs.protocols.recruitment_sweep_plan(
+        axs.protocols.recruitment_sweep(
             pool,
             update=update,
             values=np.asarray([1.0, 2.0]) * axs.mV,
@@ -542,15 +541,17 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.voltage(),
-        solver_progress="plain",
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.voltage(),
+            solver_progress="plain",
+        )
     )
 
     np.testing.assert_array_equal(
@@ -594,15 +595,17 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        solver_progress="plain",
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.none(),
+            solver_progress="plain",
+        )
     )
 
     assert len(calls) == 3
@@ -650,16 +653,18 @@ def test_recruitment_sweep_keeps_axoninstance_observer_values_sequential(monkeyp
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        batch_options=axs.BatchOptions.none(time_chunk_steps=123),
-        solver_progress="plain",
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.none(),
+            batch_options=axs.BatchOptions.none(time_chunk_steps=123),
+            solver_progress="plain",
+        )
     )
 
     assert len(calls) == 3
@@ -709,15 +714,17 @@ def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypat
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        solver_progress="plain",
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.none(),
+            solver_progress="plain",
+        )
     )
 
     assert [len(call) for call in calls] == [2, 2, 2]
@@ -778,7 +785,7 @@ def test_recruitment_plan_chunks_batched_observer_amplitudes_lazily():
             amplitude=-value,
         )
 
-    plan = axs.protocols.recruitment_sweep_plan(
+    plan = axs.protocols.recruitment_sweep(
         pool,
         update=axs.protocols.ExtracellularWaveformUpdate(waveform),
         values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
@@ -808,7 +815,7 @@ def test_recruitment_batch_planning_is_separate_from_execution():
             amplitude=-value,
         )
     )
-    plan = axs.protocols.recruitment_sweep_plan(
+    plan = axs.protocols.recruitment_sweep(
         pool,
         update=update,
         values=tuple(np.asarray([0.0, 1.0, 2.0]) * axs.nA),
@@ -858,15 +865,19 @@ def test_recruitment_numeric_waveform_axis_matches_single_value_chunks():
         "recording": axs.Recording.none(),
         "batch_amplitudes": True,
     }
-    one = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=1,
-        **kwargs,
+    one = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=1,
+            **kwargs,
+        )
     )
-    full = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=None,
-        **kwargs,
+    full = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=None,
+            **kwargs,
+        )
     )
 
     np.testing.assert_array_equal(full.activated, one.activated)
@@ -919,15 +930,19 @@ def test_recruitment_numeric_axis_matches_single_chunks_with_multiple_drives():
         "recording": axs.Recording.none(),
         "batch_amplitudes": True,
     }
-    one = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=1,
-        **kwargs,
+    one = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=1,
+            **kwargs,
+        )
     )
-    full = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=None,
-        **kwargs,
+    full = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=None,
+            **kwargs,
+        )
     )
 
     np.testing.assert_array_equal(full.activated, one.activated)
@@ -990,15 +1005,19 @@ def test_recruitment_double_cable_numeric_axis_supports_multiple_drives():
         "recording": axs.Recording.none(),
         "batch_amplitudes": True,
     }
-    one = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=1,
-        **kwargs,
+    one = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=1,
+            **kwargs,
+        )
     )
-    full = axs.protocols.recruitment_sweep(
-        update=make_update(),
-        amplitude_batch_size=None,
-        **kwargs,
+    full = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            update=make_update(),
+            amplitude_batch_size=None,
+            **kwargs,
+        )
     )
 
     np.testing.assert_array_equal(full.activated, one.activated)
@@ -1030,7 +1049,7 @@ def test_recruitment_plan_can_batch_double_cable_observer_amplitudes():
         )
     )
 
-    plan = axs.protocols.recruitment_sweep_plan(
+    plan = axs.protocols.recruitment_sweep(
         pool,
         update=update,
         values=np.asarray([0.0, 1.0]) * axs.nA,
@@ -1108,13 +1127,15 @@ def test_pool_sweep_accepts_generic_observer(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    sweep = axs.protocols.pool_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
+    sweep = axs.Runner().run(
+        axs.protocols.pool_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+        )
     )
 
     assert sweep.n_values == 3
@@ -1141,19 +1162,21 @@ def test_pool_sweep_uses_generic_numeric_axis_for_typed_updates(monkeypatch):
         )
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
-    sweep = axs.protocols.pool_sweep(
-        pool,
-        update=axs.protocols.ExtracellularWaveformUpdate(
-            lambda value: axs.Stimulus.pulse(
-                start=0.2 * axs.ms,
-                duration=0.1 * axs.ms,
-                amplitude=-value,
-            )
-        ),
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.uA,
-        observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
+    sweep = axs.Runner().run(
+        axs.protocols.pool_sweep(
+            pool,
+            update=axs.protocols.ExtracellularWaveformUpdate(
+                lambda value: axs.Stimulus.pulse(
+                    start=0.2 * axs.ms,
+                    duration=0.1 * axs.ms,
+                    amplitude=-value,
+                )
+            ),
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.uA,
+            observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+        )
     )
 
     assert [axis_input.size for axis_input in axis_inputs] == [1, 1, 1]
@@ -1186,15 +1209,17 @@ def test_pool_sweep_solver_progress_is_first_run_only(monkeypatch, capsys):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    axs.protocols.pool_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        progress="plain",
-        solver_progress="plain",
+    axs.Runner().run(
+        axs.protocols.pool_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            progress="plain",
+            solver_progress="plain",
+        )
     )
 
     captured = capsys.readouterr()
@@ -1235,17 +1260,19 @@ def test_find_threshold_accepts_mutating_or_replacing_update(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.find_threshold(
-        pool,
-        rows=rows,
-        update=update,
-        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.voltage(),
-        tolerance=0.25 * axs.nA,
-        max_iterations=8,
+    curve = axs.Runner().run(
+        axs.protocols.find_threshold(
+            pool,
+            rows=rows,
+            update=update,
+            bounds=(0.0 * axs.nA, 2.0 * axs.nA),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.voltage(),
+            tolerance=0.25 * axs.nA,
+            max_iterations=8,
+        )
     )
 
     assert curve.status == ("threshold", "threshold")
@@ -1283,17 +1310,19 @@ def test_threshold_curve_solver_progress_is_first_run_only(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    axs.protocols.find_threshold(
-        pool,
-        update=update,
-        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.voltage(),
-        tolerance=0.25 * axs.nA,
-        max_iterations=8,
-        solver_progress="plain",
+    axs.Runner().run(
+        axs.protocols.find_threshold(
+            pool,
+            update=update,
+            bounds=(0.0 * axs.nA, 2.0 * axs.nA),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.voltage(),
+            tolerance=0.25 * axs.nA,
+            max_iterations=8,
+            solver_progress="plain",
+        )
     )
 
     assert progress_values[0] == "plain"
@@ -1325,17 +1354,19 @@ def test_find_threshold_uses_activation_observer_only_path(monkeypatch):
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.find_threshold(
-        pool,
-        update=update,
-        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        tolerance=0.25 * axs.nA,
-        max_iterations=8,
-        recording=axs.Recording.none(),
-        batch_options=axs.BatchOptions.full(time_chunk_steps=5),
+    curve = axs.Runner().run(
+        axs.protocols.find_threshold(
+            pool,
+            update=update,
+            bounds=(0.0 * axs.nA, 2.0 * axs.nA),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            tolerance=0.25 * axs.nA,
+            max_iterations=8,
+            recording=axs.Recording.none(),
+            batch_options=axs.BatchOptions.full(time_chunk_steps=5),
+        )
     )
 
     assert curve.status == ("threshold", "threshold")
@@ -1395,21 +1426,23 @@ def test_find_threshold_accepts_callable_bounds_and_relative_tolerance(monkeypat
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
 
-    curve = axs.protocols.find_threshold(
-        pool=pool,
-        rows=rows,
-        update=update,
-        bounds=lambda row: (
-            0.0 * axs.nA,
-            (2.0 if row == "low" else 8.0) * axs.nA,
-        ),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.voltage(),
-        tolerance=None,
-        relative_tolerance=0.1,
-        max_iterations=12,
+    curve = axs.Runner().run(
+        axs.protocols.find_threshold(
+            pool=pool,
+            rows=rows,
+            update=update,
+            bounds=lambda row: (
+                0.0 * axs.nA,
+                (2.0 if row == "low" else 8.0) * axs.nA,
+            ),
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.voltage(),
+            tolerance=None,
+            relative_tolerance=0.1,
+            max_iterations=12,
+        )
     )
 
     assert curve.status == ("threshold", "threshold")

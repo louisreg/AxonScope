@@ -162,7 +162,7 @@ def main() -> None:
             pool.append(simulation)
 
         # Step 7: describe the search lazily, then execute it through one runner.
-        plan = axs.protocols.find_threshold_plan(
+        plan = axs.protocols.find_threshold(
             tuple(pool),
             rows=diameters,
             update=lambda sim, current, name=waveform: update_point_source_current(

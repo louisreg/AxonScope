@@ -43,17 +43,17 @@ AxonSimulation or AxonPopulation
 materializes and caches the canonical `AxonPopulation`; explicit `estimate()`,
 `inspect()`, or access to `AxonSimulation.population` intentionally cross the
 same boundary. Generic pool sweeps and recruitment sweeps follow the same route:
-`pool_sweep_plan(...)` and `recruitment_sweep_plan(...)` return immutable
-`SweepPlan` descriptions, while `find_threshold_plan(...)` returns a
-`ThresholdPlan`. Their convenience functions execute those plans immediately.
-Numeric-axis preparation, value chunk scheduling, callable-bound resolution,
-and threshold bisection happen only inside the runner.
+`pool_sweep(...)` and `recruitment_sweep(...)` return immutable `SweepPlan`
+descriptions, while `find_threshold(...)` returns a `ThresholdPlan`. There is no
+second convenience path that silently creates another runner. Numeric-axis
+preparation, value chunk scheduling, callable-bound resolution, and threshold
+bisection happen only inside the runner.
 
 Build a plan explicitly when several operations should intentionally share one
 runner's preparation cache or when work must be inspected before execution:
 
 ```python
-plan = axs.protocols.recruitment_sweep_plan(
+plan = axs.protocols.recruitment_sweep(
     population,
     update=update,
     values=amplitudes,

@@ -237,7 +237,7 @@ def _build_study(
             amplitude=-value,
         )
     )
-    sweep = axs.protocols.recruitment_sweep_plan(
+    sweep = axs.protocols.recruitment_sweep(
         sweep_pool,
         update=update,
         values=amplitudes,
@@ -254,7 +254,7 @@ def _build_study(
         axis_builder.numeric_axis_input(tuple(amplitudes))
     )
 
-    threshold = axs.ThresholdPlan(
+    threshold = axs.plans.ThresholdPlan(
         source=simple,
         update=_identity_update,
         decode=_never_satisfied,
@@ -320,7 +320,7 @@ def _observer_plan(
     policy: axs.ExecutionPolicy,
     activation: axs.analysis.Activation,
     size: int,
-) -> axs.SimulationPlan:
+) -> axs.plans.SimulationPlan:
     axon = axs.axons.HodgkinHuxley(
         length=200.0 * axs.um,
         diameter=0.8 * axs.um,
@@ -395,7 +395,7 @@ def _run_scale_profiled(
     output: Path,
     label: str,
     runner: axs.Runner,
-    plan: axs.SimulationPlan,
+    plan: axs.plans.SimulationPlan,
     activation: axs.analysis.Activation,
     *,
     memory_trace: str,
@@ -435,7 +435,10 @@ def _run_scale_profiled(
     }
 
 
-def _study_signature(result: axs.StudyResult, activation: axs.analysis.Activation) -> dict[str, Any]:
+def _study_signature(
+    result: Any,
+    activation: axs.analysis.Activation,
+) -> dict[str, Any]:
     simple = result["simple"]
     mixed = result["mixed"]
     numeric_axis = result["numeric_axis"]
@@ -449,7 +452,7 @@ def _study_signature(result: axs.StudyResult, activation: axs.analysis.Activatio
             _activation_observations_from_pool_result(numeric_axis, activation),
             dtype=bool,
         ).tolist(),
-        "sweep_activation": np.asarray(sweep.observations, dtype=bool).tolist(),
+        "sweep_activation": np.asarray(sweep.activated, dtype=bool).tolist(),
         "threshold": {
             "status": [str(item) for item in threshold.status],
             "threshold_uA": _float_list(threshold.threshold_uA),

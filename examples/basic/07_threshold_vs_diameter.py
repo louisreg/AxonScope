@@ -54,6 +54,7 @@ def main() -> None:
         blanking=stim_start,
         target=axs.positions.DISTAL,
     )
+    runner = axs.Runner()
 
     # The protocol calls this function with a candidate current amplitude at
     # every bisection step. Only the drive stimulus changes; the sampled
@@ -121,26 +122,28 @@ def main() -> None:
             sim.add_extracellular_stimulation(stimulation=extracellular)
             rattay_pool.append(sim)
 
-        rattay_curve = axs.protocols.find_threshold(
-            tuple(rattay_pool),
-            rows=rattay_diameters,
-            update=lambda sim, current, pw=pulse_width: update_point_source_current(
-                sim,
-                current,
-                pulse_width=pw,
-            ),
-            bounds=rattay_bounds_by_pulse_us[pulse_us],
-            duration=6.0 * axs.ms,
-            dt=0.01 * axs.ms,
-            criterion=criterion,
-            tolerance=0.01 * axs.uA,
-            relative_tolerance=0.01,
-            max_iterations=20,
-            recording=axs.Recording.probes(axs.signals.Vm, count=9),
-            progress=True,
-            solver_progress=(
-                "plain" if show_cold_solver_progress["Rattay-Aberham"] else False
-            ),
+        rattay_curve = runner.run(
+            axs.protocols.find_threshold(
+                tuple(rattay_pool),
+                rows=rattay_diameters,
+                update=lambda sim, current, pw=pulse_width: update_point_source_current(
+                    sim,
+                    current,
+                    pulse_width=pw,
+                ),
+                bounds=rattay_bounds_by_pulse_us[pulse_us],
+                duration=6.0 * axs.ms,
+                dt=0.01 * axs.ms,
+                criterion=criterion,
+                tolerance=0.01 * axs.uA,
+                relative_tolerance=0.01,
+                max_iterations=20,
+                recording=axs.Recording.probes(axs.signals.Vm, count=9),
+                progress=True,
+                solver_progress=(
+                    "plain" if show_cold_solver_progress["Rattay-Aberham"] else False
+                ),
+            )
         )
         show_cold_solver_progress["Rattay-Aberham"] = False
         results["Rattay-Aberham"][pulse_us] = rattay_curve
@@ -185,24 +188,26 @@ def main() -> None:
             mrg_pool.append(sim)
 
         mrg_node_indices = tuple(int(value) for value in mrg_pool[0].node_indices)
-        mrg_curve = axs.protocols.find_threshold(
-            tuple(mrg_pool),
-            rows=mrg_diameters,
-            update=lambda sim, current, pw=pulse_width: update_point_source_current(
-                sim,
-                current,
-                pulse_width=pw,
-            ),
-            bounds=mrg_bounds_by_pulse_us[pulse_us],
-            duration=5.0 * axs.ms,
-            dt=0.01 * axs.ms,
-            criterion=criterion,
-            tolerance=0.01 * axs.uA,
-            relative_tolerance=0.01,
-            max_iterations=20,
-            recording=axs.Recording.indices(mrg_node_indices, axs.signals.Vm),
-            progress=True,
-            solver_progress="plain" if show_cold_solver_progress["MRG"] else False,
+        mrg_curve = runner.run(
+            axs.protocols.find_threshold(
+                tuple(mrg_pool),
+                rows=mrg_diameters,
+                update=lambda sim, current, pw=pulse_width: update_point_source_current(
+                    sim,
+                    current,
+                    pulse_width=pw,
+                ),
+                bounds=mrg_bounds_by_pulse_us[pulse_us],
+                duration=5.0 * axs.ms,
+                dt=0.01 * axs.ms,
+                criterion=criterion,
+                tolerance=0.01 * axs.uA,
+                relative_tolerance=0.01,
+                max_iterations=20,
+                recording=axs.Recording.indices(mrg_node_indices, axs.signals.Vm),
+                progress=True,
+                solver_progress="plain" if show_cold_solver_progress["MRG"] else False,
+            )
         )
         show_cold_solver_progress["MRG"] = False
         results["MRG"][pulse_us] = mrg_curve

@@ -5,8 +5,8 @@ Run:
 
 This example focuses on recruitment protocols only. The axon pool is fixed; the
 protocol sweeps current magnitude for several temporal waveform families.
-`recruitment_sweep(...)` evaluates the sampled values sequentially by default,
-and each value runs the whole pool through the normal batch dispatcher.
+`recruitment_sweep(...)` describes each sweep. One shared `Runner` executes the
+plans and reuses compatible preparation across waveform families.
 """
 
 from __future__ import annotations
@@ -115,6 +115,7 @@ def main() -> None:
             )
         raise ValueError(f"Unknown recruitment waveform: {waveform_name!r}")
 
+    runner = axs.Runner()
     for waveform in waveforms:
         # Step 3: rebuild an identical local pool for each waveform. This keeps
         # the mutable electrode stimulus history separate between protocol runs.
@@ -145,17 +146,19 @@ def main() -> None:
             )
         )
 
-        curve = axs.protocols.recruitment_sweep(
-            tuple(pool),
-            update=update_waveform_current,
-            values=amplitudes,
-            duration=3.0 * axs.ms,
-            dt=0.02 * axs.ms,
-            criterion=criterion,
-            recording=recording_policy,
-            batch_options=batch_options,
-            progress=True,
-            solver_progress="plain" if show_cold_solver_progress else False,
+        curve = runner.run(
+            axs.protocols.recruitment_sweep(
+                tuple(pool),
+                update=update_waveform_current,
+                values=amplitudes,
+                duration=3.0 * axs.ms,
+                dt=0.02 * axs.ms,
+                criterion=criterion,
+                recording=recording_policy,
+                batch_options=batch_options,
+                progress=True,
+                solver_progress="plain" if show_cold_solver_progress else False,
+            )
         )
         show_cold_solver_progress = False
         curves[waveform] = curve

@@ -19,6 +19,28 @@ def test_public_results_expose_one_canonical_path():
     assert "CohortResult" not in axs.results.__all__
 
 
+def test_public_plan_api_has_one_execution_vocabulary():
+    for name in (
+        "NumericAxisPlan",
+        "PlanEstimate",
+        "PlanInspection",
+        "PopulationPlan",
+        "RunnablePlan",
+        "SimulationPlan",
+        "StudyResult",
+        "SweepPlan",
+        "ThresholdPlan",
+    ):
+        assert not hasattr(axs, name)
+        assert name not in axs.__all__
+
+    assert not hasattr(axs.Runner, "run_many")
+    assert not hasattr(axs.StudyPlan, "from_plans")
+    for name in ("find_threshold_plan", "pool_sweep_plan", "recruitment_sweep_plan"):
+        assert not hasattr(axs.protocols, name)
+        assert name not in axs.protocols.__all__
+
+
 def test_public_unmyelinated_template_and_simulate():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,

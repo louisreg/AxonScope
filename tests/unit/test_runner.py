@@ -55,9 +55,9 @@ def _extracellular_simulation() -> axs.AxonSimulation:
 def test_simulation_plan_is_immutable_and_contains_no_dispatch_state():
     plan = _simulation().plan()
 
-    assert isinstance(plan, axs.RunnablePlan)
-    assert isinstance(plan, axs.SimulationPlan)
-    assert isinstance(plan.population, axs.PopulationPlan)
+    assert isinstance(plan, axs.plans.RunnablePlan)
+    assert isinstance(plan, axs.plans.SimulationPlan)
+    assert isinstance(plan.population, axs.plans.PopulationPlan)
     assert plan.expected_rows == 1
     assert not hasattr(plan, "groups")
     assert not hasattr(plan, "runtime_context")
@@ -85,7 +85,7 @@ def test_plan_creation_does_not_materialize_population(monkeypatch):
     plan = _simulation().plan()
 
     assert plan.expected_rows == 1
-    assert isinstance(plan.population, axs.PopulationPlan)
+    assert isinstance(plan.population, axs.plans.PopulationPlan)
 
 
 def test_membrane_validation_is_deferred_to_runner_preparation():
@@ -157,7 +157,7 @@ def test_numeric_axis_plan_composes_source_without_expanding_python_rows():
 
     plan = source.with_numeric_axis(axis_input)
 
-    assert isinstance(plan, axs.NumericAxisPlan)
+    assert isinstance(plan, axs.plans.NumericAxisPlan)
     assert plan.source is source
     assert plan.expected_rows == 3
     assert plan.source.population.source is source.population.source
@@ -180,19 +180,19 @@ def test_runner_estimates_numeric_axis_peak_as_one_compact_execution():
     estimate = axs.Runner().estimate(plan)
     inspection = axs.Runner().inspect(plan)
 
-    assert isinstance(estimate, axs.PlanEstimate)
+    assert isinstance(estimate, axs.performance.PlanEstimate)
     assert estimate.simulation_executions_min == 1
     assert estimate.simulation_executions_max == 1
     assert estimate.peak.axon_count == 3
     assert estimate.peak.groups[0].size == 3
-    assert isinstance(inspection, axs.PlanInspection)
+    assert isinstance(inspection, axs.inspection.PlanInspection)
     assert inspection.components[0].simulation.planning.axon_count == 3
     assert inspection.components[0].simulation.dispatch_groups[0].size == 3
 
 
 def test_runner_estimates_sweep_peak_separately_from_repeated_work():
     simulation = _extracellular_simulation()
-    plan = axs.protocols.pool_sweep_plan(
+    plan = axs.protocols.pool_sweep(
         simulation.population,
         update=axs.protocols.ExtracellularWaveformUpdate(
             lambda value: axs.Stimulus.pulse(
@@ -223,7 +223,7 @@ def test_runner_estimates_sweep_peak_separately_from_repeated_work():
 
 def test_runner_composed_reports_bound_threshold_and_study_work():
     source = _simulation().plan()
-    threshold = axs.ThresholdPlan(
+    threshold = axs.plans.ThresholdPlan(
         source=source,
         update=lambda row, value: row,
         decode=lambda result: (False,),
@@ -309,7 +309,7 @@ def test_pool_sweep_plan_defers_update_and_numeric_preparation():
         calls.append((row, value))
         return row
 
-    plan = axs.protocols.pool_sweep_plan(
+    plan = axs.protocols.pool_sweep(
         simulation.population,
         update=update,
         values=(1.0, 2.0, 3.0),
@@ -322,7 +322,7 @@ def test_pool_sweep_plan_defers_update_and_numeric_preparation():
         value_batch_size=1,
     )
 
-    assert isinstance(plan, axs.SweepPlan)
+    assert isinstance(plan, axs.plans.SweepPlan)
     assert plan.expected_rows == 3
     assert [values for _, values in plan.value_batches()] == [(1.0,), (2.0,), (3.0,)]
     assert calls == []
@@ -340,7 +340,7 @@ def test_threshold_plan_defers_bounds_and_updates():
         calls.append(("update", row, value))
         return row
 
-    plan = axs.protocols.find_threshold_plan(
+    plan = axs.protocols.find_threshold(
         simulation.population,
         update=update,
         bounds=bounds,
@@ -351,7 +351,7 @@ def test_threshold_plan_defers_bounds_and_updates():
         recording=axs.Recording.none(),
     )
 
-    assert isinstance(plan, axs.ThresholdPlan)
+    assert isinstance(plan, axs.plans.ThresholdPlan)
     assert plan.expected_rows == 1
     assert plan.bounds is bounds
     assert calls == []
@@ -448,7 +448,13 @@ def test_study_failure_retains_completed_results(monkeypatch):
 
 def test_study_cancellation_stops_before_next_task(monkeypatch):
     plans = tuple(_simulation().plan() for _ in range(3))
-    study = axs.StudyPlan.from_plans(plans, name="cancelled")
+    study = axs.StudyPlan(
+        name="cancelled",
+        tasks=tuple(
+            axs.StudyTask(f"task_{index}", plan)
+            for index, plan in enumerate(plans)
+        ),
+    )
     runner = axs.Runner()
     cancellation = axs.CancellationToken()
     calls = []

@@ -614,22 +614,24 @@ def _run_one(
                 batch_amplitudes=policy.batch_amplitudes,
                 amplitude_batch_size=policy.amplitude_batch_size,
             ):
-                curve = axs.protocols.recruitment_sweep(
-                    pool,
-                    update=update,
-                    values=current_steps,
-                    duration=float(args.duration_ms) * axs.ms,
-                    dt=float(args.dt_ms) * axs.ms,
-                    criterion=criterion,
-                    recording=axs.Recording.none(),
-                    batch_options=axs.BatchOptions.none(
-                        time_chunk_steps=int(args.time_chunk_steps)
-                    ),
-                    batch_amplitudes=policy.batch_amplitudes,
-                    amplitude_batch_size=policy.amplitude_batch_size,
-                    execution_policy=execution_policy,
-                    progress=False,
-                    solver_progress=False,
+                curve = axs.Runner().run(
+                    axs.protocols.recruitment_sweep(
+                        pool,
+                        update=update,
+                        values=current_steps,
+                        duration=float(args.duration_ms) * axs.ms,
+                        dt=float(args.dt_ms) * axs.ms,
+                        criterion=criterion,
+                        recording=axs.Recording.none(),
+                        batch_options=axs.BatchOptions.none(
+                            time_chunk_steps=int(args.time_chunk_steps)
+                        ),
+                        batch_amplitudes=policy.batch_amplitudes,
+                        amplitude_batch_size=policy.amplitude_batch_size,
+                        execution_policy=execution_policy,
+                        progress=False,
+                        solver_progress=False,
+                    )
                 )
             counts = np.asarray(curve.activated, dtype=bool).sum(axis=1)
         if args.drive_count == 2:

@@ -1,7 +1,7 @@
 """Work with canonical pool results.
 
 Run:
-    python examples/advanced/simulation_workflow/03_pool_results.py
+    python examples/advanced/simulation_workflow/02_pool_results.py
 
 Pool simulations return one canonical result object instead of a plain list.
 Indexing or iterating over that object gives one-axon views in the original

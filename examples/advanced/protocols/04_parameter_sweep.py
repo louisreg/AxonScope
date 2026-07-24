@@ -1,4 +1,4 @@
-"""Build a generic sweep plan, then execute it through one runner."""
+"""Describe, estimate, and execute a generic parameter sweep."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def main() -> None:
         )
         return row
 
-    plan = axs.protocols.pool_sweep_plan(
+    plan = axs.protocols.pool_sweep(
         (axon,),
         update=with_current,
         values=amplitudes,
@@ -41,12 +41,13 @@ def main() -> None:
     )
 
     runner = axs.Runner()
-    estimate = runner.estimate(plan.source)
+    estimate = runner.estimate(plan)
     sweep = runner.run(plan)
 
     print(
         f"kind={plan.plan_kind}, rows={plan.expected_rows}, "
-        f"source_estimate={estimate.total_mib:.3f} MiB"
+        f"executions={estimate.simulation_executions_max}, "
+        f"peak={estimate.peak_mib:.3f} MiB"
     )
     fig, ax = plt.subplots(figsize=(7.0, 4.0))
     sweep.plot(ax=ax, value_unit=axs.nA, marker="o")

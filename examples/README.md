@@ -31,11 +31,9 @@ still runnable examples, but they explain the moving parts more explicitly.
 
 ### Simulation Workflow
 
-- `simulation_workflow/01_axon_simulation_root.py`: use `AxonSimulation` as the
-  executable root.
-- `simulation_workflow/02_axon_population.py`: build and run explicit
-  `AxonPopulation` cohorts.
-- `simulation_workflow/03_pool_results.py`: inspect canonical pool results and
+- `simulation_workflow/01_axon_population.py`: use an explicit
+  `AxonPopulation` when a workflow already owns concrete instance rows.
+- `simulation_workflow/02_pool_results.py`: inspect canonical pool results and
   per-axon views.
 
 ### Axon Models
@@ -107,8 +105,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   different extracellular waveforms.
 - `protocols/03_protocol_result_views.py`: inspect protocol summaries as
   compact text, dataframes, direct view rows, and plots without running a solver.
-- `protocols/04_lazy_sweep_plan.py`: describe a generic value sweep without
-  executing it, then estimate and run it through one reusable runner.
+- `protocols/04_parameter_sweep.py`: describe a generic value sweep, estimate
+  its repeated work and peak memory, then run it through one reusable runner.
 
 ### Runtime
 
@@ -121,9 +119,9 @@ still runnable examples, but they explain the moving parts more explicitly.
   policies and inspect the resolved double-cable backend route.
 - `runtime/04_cache_policy.py`: inspect deterministic generated/runtime cache
   sections, generate one requested membrane target, and clean known artifacts.
-- `runtime/05_lazy_plans.py`: compose lazy simulation plans into a named
-  study, inspect peak memory versus repeated work, and execute its tasks
-  through one state-reusing runner.
+- `runtime/05_study_plan.py`: compose lazy simulation plans into a named study,
+  estimate and inspect it, execute it through one state-reusing runner, and
+  request cooperative cancellation.
 
 ## With NRV
 

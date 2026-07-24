@@ -8,7 +8,6 @@ from typing import Any, Sequence
 import numpy as np
 
 from axonfleet.plans import SweepPlan
-from axonfleet.protocols.results import PoolSweepResult
 from axonfleet.protocols.types import (
     PoolObserver,
     PoolUpdate,
@@ -18,7 +17,6 @@ from axonfleet.protocols.types import (
 from axonfleet.protocols.values import _normalize_sweep_values
 from axonfleet.recording import Recording
 from axonfleet.runtime import ExecutionPolicy
-from axonfleet.runner import Runner
 from axonfleet.simulation import AxonSimulation
 from axonfleet.solvers import BatchOptions
 
@@ -45,8 +43,11 @@ def pool_sweep(
     progress: bool | str = False,
     progress_summary: ProgressSummary | None = None,
     solver_progress: bool | str = False,
-) -> PoolSweepResult:
-    """Sweep a parameter over a stable simulation pool.
+    value_batch_size: int = 1,
+) -> SweepPlan:
+    """Describe a lazy parameter sweep over a stable simulation pool.
+
+    Execute the returned plan with :meth:`axonfleet.Runner.run`.
 
     Parameters
     ----------
@@ -80,52 +81,8 @@ def pool_sweep(
     """
 
     base_pool = tuple(pool)
-    value_tuple = _normalize_sweep_values(values)
-    if len(base_pool) == 0:
-        return PoolSweepResult(
-            values=value_tuple,
-            observations=np.zeros((len(value_tuple), 0), dtype=object),
-        )
-
-    return Runner().run(
-        pool_sweep_plan(
-            base_pool,
-            update=update,
-            values=value_tuple,
-            observe=observe,
-            duration=duration,
-            dt=dt,
-            recording=recording,
-            batch_options=batch_options,
-            execution_policy=execution_policy,
-            progress=progress,
-            progress_summary=progress_summary,
-            solver_progress=solver_progress,
-        )
-    )
-
-
-def pool_sweep_plan(
-    pool: Sequence[SimulationCandidate],
-    *,
-    update: PoolUpdate,
-    values: Sequence[Any],
-    observe: PoolObserver,
-    duration: Any,
-    dt: Any,
-    recording: Recording | None = None,
-    batch_options: BatchOptions | None = None,
-    execution_policy: ExecutionPolicy | None = None,
-    progress: bool | str = False,
-    progress_summary: ProgressSummary | None = None,
-    solver_progress: bool | str = False,
-    value_batch_size: int = 1,
-) -> SweepPlan:
-    """Build a lazy generic sweep plan without executing or grouping rows."""
-
-    base_pool = tuple(pool)
     if not base_pool:
-        raise ValueError("pool_sweep_plan requires at least one source row.")
+        raise ValueError("pool_sweep requires at least one source row.")
     value_tuple = _normalize_sweep_values(values)
     source = AxonSimulation(
         axons=base_pool,
@@ -161,5 +118,4 @@ def _normalize_value_batch_size(
 
 __all__ = [
     "pool_sweep",
-    "pool_sweep_plan",
 ]

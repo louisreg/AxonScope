@@ -665,8 +665,9 @@ def test_axon_simulation_delegates_one_plan_to_runner():
     assert "def _population(" in runner_text
     assert "run_pool(" not in simulation_text
     assert "_execute_dispatch_plan(" in runner_text
-    assert "StudyPlan.from_plans" in runner_text
-    assert "tuple(self.run(plan) for plan in plans)" not in runner_text
+    assert "def _run_study(" in runner_text
+    assert "def run_many(" not in runner_text
+    assert "StudyPlan.from_plans" not in runner_text
 
 
 def test_examples_and_public_docs_teach_one_result_path():
@@ -2356,8 +2357,9 @@ def test_threshold_protocol_builds_a_plan_instead_of_owning_execution():
     )
     runner_text = (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
 
-    assert "find_threshold_plan" in threshold_text
+    assert "def find_threshold(" in threshold_text
     assert "ThresholdPlan(" in threshold_text
+    assert "Runner" not in threshold_text
     assert "_evaluate_threshold_updated_pool" not in threshold_text
     assert "for iteration in range" not in threshold_text
     assert "_run_threshold" in runner_text

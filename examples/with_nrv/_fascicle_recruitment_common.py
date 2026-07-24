@@ -159,22 +159,24 @@ def run_fascicle_recruitment_example(
         blanking=config.stimulus_start_ms * axs.ms,
         target=axs.positions.ALL,
     )
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update_life_current,
-        values=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
-        duration=config.duration_ms * axs.ms,
-        dt=config.dt_ms * axs.ms,
-        criterion=activation,
-        recording=axs.Recording.none(),
-        batch_options=axs.BatchOptions.none(
-            time_chunk_steps=config.observer_time_chunk_steps
-        ),
-        execution_policy=config.execution_policy,
-        progress=True,
-        solver_progress=config.solver_progress,
-        batch_amplitudes=config.batch_amplitudes,
-        amplitude_batch_size=config.amplitude_batch_size,
+    curve = axs.Runner().run(
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update_life_current,
+            values=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
+            duration=config.duration_ms * axs.ms,
+            dt=config.dt_ms * axs.ms,
+            criterion=activation,
+            recording=axs.Recording.none(),
+            batch_options=axs.BatchOptions.none(
+                time_chunk_steps=config.observer_time_chunk_steps
+            ),
+            execution_policy=config.execution_policy,
+            progress=True,
+            solver_progress=config.solver_progress,
+            batch_amplitudes=config.batch_amplitudes,
+            amplitude_batch_size=config.amplitude_batch_size,
+        )
     )
 
     fig, ax = plt.subplots(figsize=(7.0, 4.5), constrained_layout=True)

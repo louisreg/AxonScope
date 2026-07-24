@@ -40,9 +40,11 @@ it is not a second public plan type. `AxonSimulation.run()` remains the
 canonical convenience interface and delegates its generated plan to a runner.
 
 The second migration slice adds generic `SweepPlan`. Public pool and
-recruitment helpers now build this plan and delegate it to `Runner`; typed
+recruitment helpers now only build this plan; typed
 numeric-axis preparation, value chunking, per-value execution, progress, and
-generic observation assembly happen there. The private
+generic observation assembly happen inside `Runner`. A generic plan-level
+result factory converts recruitment observations to the canonical
+`RecruitmentCurve` before the runner returns. The private
 `AxonSimulation._run_numeric_axis()` route and the protocol-specific numeric
 sweep plan were removed.
 
@@ -62,8 +64,8 @@ canonical `AxonPopulation` when executing, estimating, inspecting, or serving
 an explicit population access. Sweep and threshold composition reuse the same
 runner-owned population instead of normalizing rows before execution.
 
-The sixth migration slice replaces `run_many()`'s tuple loop with a generic
-named dependency composition. `Runner` validates and executes a stable
+The sixth migration slice replaces tuple execution with a generic named
+dependency composition. `Runner` validates and executes a stable
 topological order, emits one benchmark span per task, preserves completed
 results in structured fail-fast errors, and supports cooperative cancellation
 between tasks and protocol iterations without interrupting an in-flight kernel.
@@ -85,8 +87,9 @@ separate future contracts.
 
 The ninth migration slice re-audits execution ownership after study
 composition. It removes the unused observer-path functions that still executed
-an `AxonSimulation` directly. Public simulation and protocol convenience APIs
-now either produce a leaf plan or execute that plan through `Runner`; explicit
+an `AxonSimulation` directly. Public protocol functions produce leaf plans;
+`Runner` is their sole executor. `AxonSimulation.run()` is the one retained
+single-simulation convenience and delegates to its runner. Explicit
 estimate/inspection builders remain the only intentional host-planning paths
 outside runtime execution.
 
@@ -114,12 +117,31 @@ and typed numeric-axis waveforms needed to describe shapes. They do not enter
 an execution context, place runtime arrays on a device, compile kernels,
 allocate result buffers, or execute solver work.
 
-## Remaining P20 Work
+The final public-surface slice removes the duplicate executing protocol
+functions and their `_plan` counterparts. `pool_sweep()`,
+`recruitment_sweep()`, and `find_threshold()` now have one meaning: describe
+lazy work. It also removes unused `Runner.run_many()` and
+`StudyPlan.from_plans()` shortcuts, keeps technical leaf-plan classes under
+`axs.plans`, and leaves only `Runner`, `StudyPlan`, and `StudyTask` at the
+package root. Examples now teach direct `AxonSimulation.run()` for one simple
+simulation and explicit `plan + Runner` for protocols and composed work.
 
-- Add result-dependent study factories only when their lazy callable and
-  reproducibility contracts are defined; do not add a second scheduler.
-- Finish local CPU and single-GPU validation of composed plans, cache
-  invalidation, cancellation, and realistic scaling.
+## Validation Evidence
+
+The acceptance campaign covers simple and mixed populations, native numeric
+axes, recruitment and threshold plans, named studies, cold/warm reuse,
+`Runner.clear()`, cache invalidation, cancellation, and compact 1024/4096-row
+scaling. The retained 2026-07-24 CPU result is
+`benchmark/results/p20_runner_validation_cpu_api_convergence_20260724`; the
+matching P100 evidence and CPU/GPU comparison are recorded by the benchmark
+launcher artifacts. Numerical acceptance uses `rtol=1e-4` and `0.025 mV`
+absolute tolerance per voltage sample, including a shape-scaled tolerance for
+reported sums.
+
+## Deferred Work
+
+Add result-dependent study factories only when their lazy callable and
+reproducibility contracts are defined; do not add a second scheduler.
 
 Multi-GPU, HPC, remote failure recovery, distributed cache policy, and bounded
 cross-worker overlap are explicitly deferred to the future distributed-runner

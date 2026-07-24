@@ -127,6 +127,7 @@ class SweepPlan(RunnablePlan[Any]):
     value_batch_size: int = 1
     progress: bool | str = False
     progress_summary: Callable[[Any], str] | None = None
+    result_factory: Callable[[Any], Any] | None = None
 
     plan_kind: ClassVar[str] = "sweep"
 
@@ -138,6 +139,8 @@ class SweepPlan(RunnablePlan[Any]):
             raise TypeError("sweep update must be callable.")
         if not callable(self.decode):
             raise TypeError("sweep decode must be callable.")
+        if self.result_factory is not None and not callable(self.result_factory):
+            raise TypeError("sweep result_factory must be callable or None.")
         object.__setattr__(self, "value_batch_size", batch_size)
 
     @property
@@ -235,23 +238,6 @@ class StudyPlan(RunnablePlan[Any]):
             raise ValueError("StudyPlan requires at least one task.")
         object.__setattr__(self, "tasks", tasks)
         _ordered_task_indices(tasks)
-
-    @classmethod
-    def from_plans(
-        cls,
-        plans: Sequence[LeafPlan],
-        *,
-        name: str = "run_many",
-    ) -> "StudyPlan":
-        """Build an independent ordered study for ``Runner.run_many``."""
-
-        return cls(
-            name=name,
-            tasks=tuple(
-                StudyTask(key=f"task_{index}", plan=plan)
-                for index, plan in enumerate(plans)
-            ),
-        )
 
     @property
     def expected_rows(self) -> int:

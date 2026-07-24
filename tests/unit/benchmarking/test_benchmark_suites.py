@@ -199,6 +199,68 @@ def test_runner_plan_validation_comparison_checks_cpu_gpu_evidence(tmp_path: Pat
     assert comparison["status"] == "passed"
 
 
+def test_runner_plan_validation_scales_voltage_sum_tolerance_by_sample_count(
+    tmp_path: Path,
+):
+    cpu_row = {
+        "shape": [10, 1],
+        "minimum_mV": -80.0,
+        "maximum_mV": -79.99,
+        "final_mV": -79.99,
+        "sum_mV": -799.95,
+    }
+    gpu_row = {
+        **cpu_row,
+        "minimum_mV": -80.02,
+        "maximum_mV": -80.01,
+        "final_mV": -80.01,
+        "sum_mV": -800.15,
+    }
+    signature = {
+        "keys": [],
+        "simple_voltage": [cpu_row],
+        "mixed_voltage": [],
+        "numeric_axis_activation": [],
+        "sweep_activation": [],
+        "threshold": {},
+    }
+    base = {
+        "status": "passed",
+        "plan": {},
+        "scales": [],
+        "cache_clear": {"passed": True},
+        "cache_invalidation": {"passed": True},
+        "cancellation": {"passed": True},
+        "runs": [{"label": "study_cold", "wall_ms": 1.0, "stages_ms": {}, "signature": signature}],
+        "scale_validation": [],
+    }
+    cpu_path = tmp_path / "cpu.json"
+    gpu_path = tmp_path / "gpu.json"
+    cpu_path.write_text(json.dumps({**base, "platform": "cpu"}), encoding="utf-8")
+    gpu_signature = {**signature, "simple_voltage": [gpu_row]}
+    gpu_path.write_text(
+        json.dumps(
+            {
+                **base,
+                "platform": "gpu",
+                "runs": [
+                    {
+                        "label": "study_cold",
+                        "wall_ms": 1.0,
+                        "stages_ms": {},
+                        "signature": gpu_signature,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert compare_runner_plan_validation(
+        [str(cpu_path), str(gpu_path), "--output", str(tmp_path / "comparison")]
+    ) == 0
+
+
 def test_curve_presets_have_explicit_scale_and_execution_defaults():
     assert PRESETS["quick"].n_axons == 1
     assert PRESETS["quick"].memory_trace == "rss"

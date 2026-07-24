@@ -253,10 +253,11 @@ When a protocol produces a per-row scientific metric, it can expose an explicit
 analysis view without losing the richer protocol object:
 
 ```python
-curve = axs.protocols.find_threshold(...)
+runner = axs.Runner()
+curve = runner.run(axs.protocols.find_threshold(...))
 threshold_metric = curve.to_analysis_result()
 
-recruitment = axs.protocols.recruitment_sweep(...)
+recruitment = runner.run(axs.protocols.recruitment_sweep(...))
 first_activation = recruitment.to_analysis_result()
 ```
 
