@@ -47,7 +47,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v2"
-SOURCE_COMPILER_VERSION = "source_codegen.v27"
+SOURCE_COMPILER_VERSION = "source_codegen.v28"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _GENERATED_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v5"
 _SIDE_EFFECT_CALLS = {
@@ -3695,6 +3695,10 @@ def _generated_triton_fused_membrane_function_source(
         f"{body}\n\n"
     )
     parameter_args = tuple(name for name in extra_args if name != "Vm")
+    parameter_field_flags = tuple(
+        f"PARAMETER_{index}_IS_FIELD"
+        for index in range(len(parameter_args))
+    )
     pointer_args = (
         "Vm",
         "gates",
@@ -3703,9 +3707,13 @@ def _generated_triton_fused_membrane_function_source(
     )
     parameter_load_lines = tuple(
         line
-        for name in parameter_args
+        for name, field_flag in zip(
+            parameter_args,
+            parameter_field_flags,
+            strict=True,
+        )
         for line in (
-            f"    if {name.upper()}_IS_FIELD:",
+            f"    if {field_flag}:",
             f"        {name} = tl.load({name}_ptr + offsets, mask=mask, other=0.0)",
             "    else:",
             f"        {name} = tl.load({name}_ptr)",
@@ -3751,7 +3759,7 @@ def _generated_triton_fused_membrane_function_source(
         "ge_out_ptr",
         "TOTAL: tl.constexpr",
         "LINEARIZE_PREVIOUS: tl.constexpr",
-        *(f"{name.upper()}_IS_FIELD: tl.constexpr" for name in parameter_args),
+        *(f"{name}: tl.constexpr" for name in parameter_field_flags),
         "BLOCK_SIZE: tl.constexpr",
     )
     source += (

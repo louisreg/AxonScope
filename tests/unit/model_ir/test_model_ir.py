@@ -567,7 +567,7 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
         parameter_values=parameter_values,
         linearize_previous=False,
     )
-    assert call["kwargs"][f"{field_parameter.upper()}_IS_FIELD"] is True
+    assert call["kwargs"]["PARAMETER_0_IS_FIELD"] is True
 
     tiled_vm = np.broadcast_to(values["Vm"], (2, values["Vm"].size))
     parameter_values[field_parameter] = np.full(
@@ -2708,6 +2708,44 @@ def test_composite_model_compiles_to_generated_runtime():
     assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
     assert np.isfinite(np.asarray(membrane.conductance_trace_matrix(gates))).all()
     assert np.isfinite(np.asarray(membrane.ionic_current_trace_matrix(V, gates))).all()
+
+
+def test_composite_triton_field_flags_are_unique_for_case_distinct_parameters(
+    tmp_path,
+):
+    model = lower_membrane_model_to_ir(
+        membranes.Composite(
+            {
+                "hh": membranes.HodgkinHuxley(),
+                "leak": membranes.Passive(),
+            }
+        )
+    )
+    cache = ensure_generated_model_ir_runtime(
+        model,
+        cache_identity=("case-distinct-triton-parameters", structural_hash(model)),
+        cache_root=tmp_path,
+        generated_targets=("triton",),
+    )
+    source = (cache.directory / "triton_model.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    kernel = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "advance_gates_and_membrane_terms_kernel"
+    )
+    flags = tuple(
+        argument.arg
+        for argument in kernel.args.args
+        if argument.arg.endswith("_IS_FIELD")
+    )
+
+    assert "el_ptr" in source
+    assert "EL_ptr" in source
+    assert flags
+    assert len(flags) == len(set(flags))
+    assert flags == tuple(f"PARAMETER_{index}_IS_FIELD" for index in range(len(flags)))
 
 
 def test_composite_generated_runtime_cache_reuses_code_across_parameters(

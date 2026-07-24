@@ -133,8 +133,8 @@ def advance_generated_membrane_terms(
         TOTAL=total,
         LINEARIZE_PREVIOUS=bool(linearize_previous),
         **{
-            f"{name.upper()}_IS_FIELD": parameter_is_field[name]
-            for name in parameter_names
+            f"PARAMETER_{index}_IS_FIELD": parameter_is_field[name]
+            for index, name in enumerate(parameter_names)
         },
         BLOCK_SIZE=int(block_size),
         num_warps=4,
