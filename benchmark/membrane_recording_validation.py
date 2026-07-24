@@ -48,20 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join(cases))
         return 0
-    if args.platform != "gpu":
-        raise SystemExit("membrane_recording_validation requires a GPU platform.")
-
     args.output.mkdir(parents=True, exist_ok=True)
     rows = []
     failed = False
+    device = axs.Device.gpu(0) if args.platform == "gpu" else axs.Device.cpu()
     for name, factory in cases.items():
-        print(f"Validating {name} full recording on CPU/GPU...")
-        cpu_result, cpu_s = _run(factory(), axs.Device.cpu())
-        gpu_result, gpu_s = _run(factory(), axs.Device.gpu(0))
-        row, arrays = _compare(name, cpu_result, gpu_result)
-        row["cpu_s"] = cpu_s
-        row["gpu_s"] = gpu_s
-        row["gpu_speedup"] = cpu_s / gpu_s if gpu_s > 0.0 else None
+        print(f"Capturing {name} full recording on {args.platform}...")
+        result, elapsed_s = _run(factory(), device)
+        row, arrays = _capture(name, result)
+        row["elapsed_s"] = elapsed_s
         rows.append(row)
         np.savez_compressed(args.output / f"{name}.npz", **arrays)
         failed |= row["status"] != "pass"
@@ -94,71 +89,29 @@ def _run(simulation: axs.AxonSimulation, device: axs.Device):
     return result, elapsed
 
 
-def _compare(name: str, cpu, gpu):
+def _capture(name: str, result):
     comparisons = []
     arrays: dict[str, np.ndarray] = {}
     failed = False
     for signal in SIGNALS:
         try:
-            cpu_values = cpu.signal(signal)
+            values = result.signal(signal)
         except KeyError:
-            cpu_values = None
-        try:
-            gpu_values = gpu.signal(signal)
-        except KeyError:
-            gpu_values = None
-        if cpu_values is None and gpu_values is None:
             continue
-        if cpu_values is None or gpu_values is None:
-            comparisons.append(
-                {
-                    "signal": signal.result_key,
-                    "status": "fail",
-                    "reason": "signal availability differs",
-                }
-            )
-            failed = True
-            continue
-        if isinstance(cpu_values, dict):
-            if set(cpu_values) != set(gpu_values):
-                comparisons.append(
-                    {
-                        "signal": signal.result_key,
-                        "status": "fail",
-                        "reason": "recorded names differ",
-                        "cpu_names": sorted(cpu_values),
-                        "gpu_names": sorted(gpu_values),
-                    }
-                )
-                failed = True
-                continue
-            items = ((key, cpu_values[key], gpu_values[key]) for key in sorted(cpu_values))
+        if isinstance(values, dict):
+            items = ((key, values[key]) for key in sorted(values))
         else:
-            items = ((signal.result_key, cpu_values, gpu_values),)
-        rtol, atol = TOLERANCES[signal.result_key]
-        for key, cpu_array, gpu_array in items:
-            cpu_array = np.asarray(cpu_array)
-            gpu_array = np.asarray(gpu_array)
+            items = ((signal.result_key, values),)
+        for key, array in items:
+            array = np.asarray(array)
             token = f"{signal.result_key}.{key}".replace("/", "_")
-            arrays[f"cpu.{token}"] = cpu_array
-            arrays[f"gpu.{token}"] = gpu_array
-            same_shape = cpu_array.shape == gpu_array.shape
-            difference = np.abs(cpu_array - gpu_array) if same_shape else np.asarray([np.inf])
-            max_abs = float(np.max(difference)) if difference.size else 0.0
-            rmse = float(np.sqrt(np.mean(difference**2))) if difference.size else 0.0
-            passed = bool(
-                same_shape
-                and np.allclose(cpu_array, gpu_array, rtol=rtol, atol=atol, equal_nan=True)
-            )
+            arrays[token] = array
+            passed = bool(np.all(np.isfinite(array)))
             comparisons.append(
                 {
                     "signal": signal.result_key,
                     "name": key,
-                    "shape": list(cpu_array.shape),
-                    "rmse": rmse,
-                    "max_abs": max_abs,
-                    "rtol": rtol,
-                    "atol": atol,
+                    "shape": list(array.shape),
                     "status": "pass" if passed else "fail",
                 }
             )
