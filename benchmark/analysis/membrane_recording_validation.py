@@ -4,11 +4,66 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from benchmark.membrane_recording_validation import TOLERANCES
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from benchmark.membrane_recording_validation import (
+    NORMALIZED_TOLERANCES,
+    TOLERANCES,
+)
+
+
+def compare_tensor(cpu_values: np.ndarray, gpu_values: np.ndarray, *, group: str) -> dict:
+    """Compare one tensor using strict and trajectory-normalized criteria."""
+
+    same_shape = cpu_values.shape == gpu_values.shape
+    if not same_shape:
+        return {
+            "shape": list(cpu_values.shape),
+            "gpu_shape": list(gpu_values.shape),
+            "status": "fail",
+            "pointwise_status": "fail",
+            "trajectory_status": "fail",
+        }
+
+    difference = np.abs(cpu_values - gpu_values)
+    finite = bool(np.all(np.isfinite(cpu_values)) and np.all(np.isfinite(gpu_values)))
+    rtol, atol = TOLERANCES[group]
+    pointwise = bool(
+        finite
+        and np.allclose(cpu_values, gpu_values, rtol=rtol, atol=atol, equal_nan=True)
+    )
+    scale = max(float(np.max(np.abs(cpu_values))), float(np.ptp(cpu_values)), 1e-12)
+    rmse = float(np.sqrt(np.mean(difference**2)))
+    max_abs = float(np.max(difference))
+    nrmse = rmse / scale
+    normalized_max = max_abs / scale
+    nrmse_limit, normalized_max_limit = NORMALIZED_TOLERANCES[group]
+    trajectory = bool(
+        finite
+        and nrmse <= nrmse_limit
+        and normalized_max <= normalized_max_limit
+    )
+    return {
+        "shape": list(cpu_values.shape),
+        "rmse": rmse,
+        "max_abs": max_abs,
+        "scale": scale,
+        "normalized_rmse": nrmse,
+        "normalized_max_abs": normalized_max,
+        "rtol": rtol,
+        "atol": atol,
+        "normalized_rmse_limit": nrmse_limit,
+        "normalized_max_abs_limit": normalized_max_limit,
+        "pointwise_status": "pass" if pointwise else "fail",
+        "trajectory_status": "pass" if trajectory else "fail",
+        "status": "pass" if pointwise or trajectory else "fail",
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,24 +97,12 @@ def main(argv: list[str] | None = None) -> int:
             case_failed = False
             for key in sorted(cpu.files):
                 group = key.split(".", 1)[0]
-                rtol, atol = TOLERANCES[group]
                 cpu_values = np.asarray(cpu[key])
                 gpu_values = np.asarray(gpu[key])
-                same_shape = cpu_values.shape == gpu_values.shape
-                difference = np.abs(cpu_values - gpu_values) if same_shape else np.asarray([np.inf])
-                passed = bool(
-                    same_shape
-                    and np.allclose(cpu_values, gpu_values, rtol=rtol, atol=atol, equal_nan=True)
-                )
-                comparisons.append({
-                    "tensor": key,
-                    "shape": list(cpu_values.shape),
-                    "rmse": float(np.sqrt(np.mean(difference**2))),
-                    "max_abs": float(np.max(difference)),
-                    "rtol": rtol,
-                    "atol": atol,
-                    "status": "pass" if passed else "fail",
-                })
+                comparison = compare_tensor(cpu_values, gpu_values, group=group)
+                comparison["tensor"] = key
+                comparisons.append(comparison)
+                passed = comparison["status"] == "pass"
                 case_failed |= not passed
             rows.append({
                 "case": cpu_path.stem,

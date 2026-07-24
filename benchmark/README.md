@@ -30,7 +30,8 @@ The registered scripts are:
 - `runner_group_scheduling`: runner grouping and scheduling costs;
 - `runner_plan_validation`: P20 lazy-plan and local Runner CPU/GPU acceptance;
 - `membrane_recording_validation`: canonical full-recording CPU/GPU numerical
-  equivalence for HH, stateful Schild/Tigerholm, and mixed MRG+Markov models;
+  equivalence for every NRV-backed built-in family, Passive, and mixed
+  MRG+Markov models;
 - `recruitment_amplitude_batch`: realistic amplitude batching and reuse;
 - `single_cable_triton_gate`: focused single-cable Triton acceptance gate;
 - `membrane_temporal`: complete temporal membrane/cable workloads;
@@ -104,6 +105,27 @@ plans; checks cold/warm reuse, `Runner.clear()`, structural invalidation, and
 cooperative cancellation; and records compact 1024/4096 observer runs. Compare
 the matching CPU/GPU `validation.json` files with
 `benchmark/analysis/runner_plan_validation.py`.
+
+Full membrane-recording equivalence is captured once per backend so a CUDA JAX
+process never attempts to execute the CPU LAPACK route:
+
+```bash
+python benchmark/run.py --script membrane_recording_validation \
+  --preset gpu_smoke --platform cpu \
+  --output benchmark/results/membrane_recording_validation_cpu
+python benchmark/run.py --script membrane_recording_validation \
+  --preset gpu_smoke --platform gpu \
+  --output benchmark/results/membrane_recording_validation_gpu
+python -m benchmark.analysis.membrane_recording_validation \
+  benchmark/results/membrane_recording_validation_cpu \
+  benchmark/results/membrane_recording_validation_gpu \
+  --output benchmark/results/membrane_recording_validation_cpu_gpu
+```
+
+The comparison retains a strict pointwise verdict and a bounded normalized
+trajectory verdict. The latter handles floating-point drift between the CPU
+Thomas and GPU tiled-Thomas solvers; it does not accept normalized RMSE above
+0.1%, peak error above 0.5%, or Vm errors above their stricter limits.
 
 Generated membrane cache loading:
 

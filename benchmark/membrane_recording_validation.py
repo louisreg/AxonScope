@@ -32,6 +32,14 @@ TOLERANCES = {
     "states": (2e-4, 2e-5),
     "occupancies": (2e-4, 2e-5),
 }
+NORMALIZED_TOLERANCES = {
+    "Vm": (5e-4, 2e-3),
+    "gates": (1e-3, 5e-3),
+    "currents": (1e-3, 5e-3),
+    "conductances": (1e-3, 5e-3),
+    "states": (1e-3, 5e-3),
+    "occupancies": (1e-3, 5e-3),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,10 +133,16 @@ def _capture(name: str, result):
 
 def _cases(case_filter: str | None):
     cases = {
+        "passive": _passive,
         "hh": _hh,
+        "rattay": _rattay,
+        "sundt": _sundt,
         "tigerholm": _tigerholm,
         "schild94": _schild94,
         "schild97": _schild97,
+        "mrg": _mrg,
+        "gaines_motor": _gaines_motor,
+        "gaines_sensory": _gaines_sensory,
         "mrg_markov": _mrg_markov,
     }
     if case_filter:
@@ -171,6 +185,43 @@ def _hh():
     )
 
 
+def _passive():
+    return _single_cable(
+        axs.axons.Unmyelinated(
+            membrane=axs.membranes.Passive(),
+            length=1000 * axs.um,
+            diameter=1 * axs.um,
+            compartments=31,
+        ),
+        duration_ms=2.0,
+        amplitude_nA=2.0,
+    )
+
+
+def _rattay():
+    return _single_cable(
+        axs.axons.RattayAberham(
+            length=1000 * axs.um,
+            diameter=1 * axs.um,
+            compartments=31,
+        ),
+        duration_ms=2.0,
+        amplitude_nA=2.0,
+    )
+
+
+def _sundt():
+    return _single_cable(
+        axs.axons.Sundt(
+            length=1000 * axs.um,
+            diameter=1 * axs.um,
+            compartments=31,
+        ),
+        duration_ms=2.0,
+        amplitude_nA=2.0,
+    )
+
+
 def _tigerholm():
     return _single_cable(
         axs.axons.Tigerholm(
@@ -205,6 +256,38 @@ def _schild97():
         duration_ms=2.0,
         amplitude_nA=1.0,
     )
+
+
+def _double_cable(axon, *, amplitude_nA: float = 5.0):
+    instance = axs.AxonInstance(axon)
+    center_node = len(axon.node_indices) // 2
+    instance.add_current_clamp(
+        position=axon.node_position(center_node, unit=axs.um),
+        current=axs.Stimulus.pulse(
+            start=0.5 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=amplitude_nA * axs.nA,
+        ),
+    )
+    return axs.AxonSimulation(
+        instance,
+        duration=1.0 * axs.ms,
+        dt=0.005 * axs.ms,
+        recording=axs.Recording.full(),
+        progress=False,
+    )
+
+
+def _mrg():
+    return _double_cable(axs.axons.MRG(diameter=10.0 * axs.um, nodes=5))
+
+
+def _gaines_motor():
+    return _double_cable(axs.axons.GainesMotor(diameter=10.0 * axs.um, nodes=5))
+
+
+def _gaines_sensory():
+    return _double_cable(axs.axons.GainesSensory(diameter=10.0 * axs.um, nodes=5))
 
 
 def _mrg_markov():
