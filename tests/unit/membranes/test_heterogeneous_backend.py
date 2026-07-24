@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 import axonfleet as axs
 from axonfleet.axons import Axon, Layout, LayoutElement, Section
@@ -128,6 +130,29 @@ def test_double_cable_backend_api_from_axon():
     assert backend.Nx == ax.n_compartments
     assert g.shape == (ax.n_compartments, backend.n_channels_max)
     assert np.isfinite(g).all()
+
+
+def test_double_cable_recording_matrices_accept_batched_rows():
+    ax = MRG(diameter=10.0 * axs.um, nodes=5)
+    solver_axon = build_solver_axon(ax)
+    membrane = compile_axon_membrane(ax, solver_axon=solver_axon)
+    nx = int(solver_axon.n_compartments)
+    voltage = jnp.full((2, nx), -80.0, dtype=jnp.float32)
+    gates = jax.vmap(membrane.init_gates)(voltage)
+
+    gate_values, occupancy_values, current_values, conductance_values = jax.jit(
+        lambda local_voltage, local_gates: (
+            membrane.gate_trace_matrix(local_gates, (), local_voltage),
+            membrane.occupancy_trace_matrix(local_gates),
+            membrane.ionic_current_trace_matrix(local_voltage, local_gates, ()),
+            membrane.conductance_trace_matrix(local_gates, ()),
+        )
+    )(voltage, gates)
+
+    assert gate_values.shape == (2, nx, len(membrane.gate_names()))
+    assert occupancy_values.shape == (2, nx, len(membrane.occupancy_names()))
+    assert current_values.shape == (2, nx, len(membrane.current_names()))
+    assert conductance_values.shape == (2, nx, len(membrane.conductance_names()))
 
 
 def test_double_cable_backend_static_identity_is_structural():

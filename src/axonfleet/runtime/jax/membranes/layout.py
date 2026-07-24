@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+import jax
 import jax.numpy as jnp
 
 from axonfleet.runtime.jax.membranes.backend import (
@@ -254,6 +255,15 @@ class HeterogeneousMembraneModel:
         state: tuple[jnp.ndarray, ...] = (),
         V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
+        if gates.ndim == 3:
+            return jax.vmap(
+                lambda local_gates, local_state, local_voltage: self.gate_trace_matrix(
+                    local_gates,
+                    local_state,
+                    local_voltage,
+                ),
+                in_axes=(0, 0, None if V_mV is None else 0),
+            )(gates, state, V_mV)
         _ = state, V_mV
         out = self._empty_trace(len(self._gate_names))
         name_to_col = {name: i for i, name in enumerate(self._gate_names)}
@@ -272,6 +282,8 @@ class HeterogeneousMembraneModel:
         return out
 
     def occupancy_trace_matrix(self, gates: jnp.ndarray) -> jnp.ndarray:
+        if gates.ndim == 3:
+            return jax.vmap(self.occupancy_trace_matrix)(gates)
         out = self._empty_trace(len(self._occupancy_names))
         name_to_col = {name: i for i, name in enumerate(self._occupancy_names)}
         for i, model in enumerate(self.models):
@@ -289,6 +301,8 @@ class HeterogeneousMembraneModel:
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
     ) -> jnp.ndarray:
+        if gates.ndim == 3:
+            return jax.vmap(self.conductance_trace_matrix)(gates, state)
         _ = state
         out = self._empty_trace(len(self._conductance_names))
         name_to_col = {name: i for i, name in enumerate(self._conductance_names)}
@@ -310,6 +324,8 @@ class HeterogeneousMembraneModel:
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
     ) -> jnp.ndarray:
+        if gates.ndim == 3:
+            return jax.vmap(self.ionic_current_trace_matrix)(V_mV, gates, state)
         _ = state
         out = self._empty_trace(len(self._current_names))
         name_to_col = {name: i for i, name in enumerate(self._current_names)}
