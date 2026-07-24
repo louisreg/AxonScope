@@ -133,8 +133,11 @@ axes, recruitment and threshold plans, named studies, cold/warm reuse,
 `Runner.clear()`, cache invalidation, cancellation, and compact 1024/4096-row
 scaling. The retained 2026-07-24 CPU result is
 `benchmark/results/p20_runner_validation_cpu_api_convergence_20260724`; the
-matching P100 evidence and CPU/GPU comparison are recorded by the benchmark
-launcher artifacts. Numerical acceptance uses `rtol=1e-4` and `0.025 mV`
+matching P100 result is under
+`benchmark/results/kaggle/20260724_132155_runner_plan_validation_gpu_smoke_gpu_NvidiaTeslaP100_axonfleet-p20-runner-validation`,
+and the accepted comparison is
+`benchmark/results/p20_runner_validation_cpu_gpu_api_convergence_20260724`.
+Numerical acceptance uses `rtol=1e-4` and `0.025 mV`
 absolute tolerance per voltage sample, including a shape-scaled tolerance for
 reported sums.
 

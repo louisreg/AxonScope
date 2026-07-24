@@ -18,8 +18,8 @@ Updated on 2026-07-23 during the P19 source and public-surface audit.
 - Compact activation, latency, spike-count, bounded spike-time, and VmRaster
   observers are available. Dense recording remains a separate memory/performance
   concern.
-- P19A and P19B are closed. P19C is intentionally deferred. P20 is active;
-  later phases remain future architecture or product expansion.
+- P19A, P19B, and P20 are closed. P19C is intentionally deferred; later
+  phases remain future architecture or product expansion.
 
 ## Non-Negotiables
 
@@ -299,19 +299,19 @@ not a wrapper or a parallel optimized route.
   once validated, then remove superseded builders, caches, wrappers, and call
   paths. Preserve `AxonSimulation(...).run()` unless an API change is discussed
   first.
-- [ ] Validate single and composed plans, mixed populations, native numeric
+- [x] Validate single and composed plans, mixed populations, native numeric
   axes, studies, cache invalidation, cancellation, local CPU, and single GPU.
   Benchmark fresh miss, structural reuse, dynamic operands, transfers,
   compilation, solve, result assembly, RSS, device memory, local scheduler
   overhead, and Naxon=1024/4096 scaling.
-- [ ] After benchmark acceptance, audit every runnable example and the public
+- [x] After benchmark acceptance, audit every runnable example and the public
   exports they teach. Remove or rewrite examples that expose superseded,
   ambiguous, redundant, or confusing workflows; add a concise didactic path
   for `SimulationPlan`, numeric/sweep plans, `StudyPlan`, shared `Runner`
   reuse, estimate/inspect, cancellation, and canonical results. Simplify the
   public API so examples teach one supported way to describe and execute each
   concept, without convenience paths that create a competing workflow.
-- [ ] After CPU/GPU validation and before closing P20, run a final Graphify
+- [x] After CPU/GPU validation and before closing P20, run a final Graphify
   convergence audit over plans, Runner, dispatcher lowering, preparation,
   runtime execution, caches, protocols, estimation, inspection, and results.
   Remove paths, names, builders, wrappers, fallbacks, or cache owners made
