@@ -27,7 +27,8 @@ The registered scripts are:
 - `recruitment_curves`: recruitment workloads;
 - `basic_examples`: executable performance gates for basic examples 06-08;
 - `with_nrv_examples`: executable gate for with-NRV example 01;
-- `dispatcher_group_scheduling`: dispatch grouping and scheduling costs;
+- `runner_group_scheduling`: runner grouping and scheduling costs;
+- `runner_plan_validation`: P20 lazy-plan and local Runner CPU/GPU acceptance;
 - `recruitment_amplitude_batch`: realistic amplitude batching and reuse;
 - `single_cable_triton_gate`: focused single-cable Triton acceptance gate;
 - `membrane_temporal`: complete temporal membrane/cable workloads;
@@ -42,7 +43,7 @@ without executing a simulation.
 - `baselines/`: independent external scientific references;
 - `campaigns/`: process-isolated benchmark matrices;
 - `curves/`: canonical curve launchers and P18 Nav validations;
-- `dispatcher/`: dispatch-level workload;
+- `runner/`: Runner scheduling and runnable-plan validation;
 - `examples/`: executable-documentation and startup workloads;
 - `kaggle/`: remote CPU/GPU packaging and submission;
 - `protocols/`: protocol-level amplitude batching workload;
@@ -83,6 +84,24 @@ costs for a large version of basic example 08.
 instrumentation and output generation without becoming a public example.
 
 ## Runtime And Membrane Gates
+
+Close the local Runner phase with the same acceptance workload on CPU and one
+GPU:
+
+```bash
+python benchmark/run.py \
+  --script runner_plan_validation \
+  --preset cpu_publication \
+  --platform cpu \
+  --scales 1024,4096 \
+  --output benchmark/results/p20_runner_validation_cpu
+```
+
+The campaign executes simple, mixed, numeric-axis, sweep, threshold, and study
+plans; checks cold/warm reuse, `Runner.clear()`, structural invalidation, and
+cooperative cancellation; and records compact 1024/4096 observer runs. Compare
+the matching CPU/GPU `validation.json` files with
+`benchmark/analysis/runner_plan_validation.py`.
 
 Generated membrane cache loading:
 

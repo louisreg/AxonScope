@@ -20,7 +20,7 @@ if __package__ in {None, ""}:
 
 import axonfleet as axs
 from axonfleet.benchmarking import benchmark_span
-from axonfleet.dispatcher.execution import DispatchSchedulingOptions, run_pool
+from axonfleet.runner import _RunnerSchedulingOptions
 from axonfleet.dispatcher.plan import build_dispatch_plan
 from axonfleet.runtime.execution import (
     execution_context,
@@ -29,7 +29,7 @@ from axonfleet.solvers import BatchOptions
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = REPO_ROOT / "benchmark" / "results" / "dispatcher_group_scheduling"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmark" / "results" / "runner_group_scheduling"
 
 INTERESTING_STAGES = (
     "benchmark.build_population",
@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     _write_manifest(output, args, policies)
     if args.dry_run:
         _write_cases(output, args, policies)
-        print(f"dry-run: dispatcher_group_scheduling -> {output}")
+        print(f"dry-run: runner_group_scheduling -> {output}")
         return 0
 
     rows: list[dict[str, Any]] = []
@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _validate_args(args: argparse.Namespace) -> None:
     if args.platform == "nrv":
-        raise SystemExit("dispatcher_group_scheduling supports cpu/gpu only.")
+        raise SystemExit("runner_group_scheduling supports cpu/gpu only.")
     if args.groups < 1:
         raise SystemExit("--groups must be >= 1.")
     if args.rows_per_group < 1:
@@ -179,18 +179,19 @@ def _run_one(
                     max_pending_groups=args.max_pending_groups,
                     dispatch_group_count=len(plan.groups),
                 ):
-                    result = run_pool(
-                        pool,
+                    runner = axs.Runner(
+                        _scheduling_options=_RunnerSchedulingOptions(
+                            async_groups=policy.async_groups,
+                            max_pending_groups=int(args.max_pending_groups),
+                        )
+                    )
+                    result = runner._execute_dispatch_plan(
+                        plan,
                         tsim_ms=float(args.duration_ms),
                         dt_ms=float(args.dt_ms),
                         batch_options=batch_options,
                         observers=observers,
                         runtime_context=context,
-                        dispatch_plan=plan,
-                        scheduling_options=DispatchSchedulingOptions(
-                            async_groups=policy.async_groups,
-                            max_pending_groups=int(args.max_pending_groups),
-                        ),
                     )
             signature = _result_signature(result)
     except BaseException as exc:
@@ -355,7 +356,7 @@ def _write_cases(
         for policy in policies:
             writer.writerow(
                 {
-                    "script": "dispatcher_group_scheduling",
+                    "script": "runner_group_scheduling",
                     "preset": args.preset,
                     "platform": args.platform,
                     "policy": policy.label,
@@ -370,7 +371,7 @@ def _write_manifest(
     policies: tuple[SchedulePolicy, ...],
 ) -> None:
     payload = {
-        "script": "dispatcher_group_scheduling",
+        "script": "runner_group_scheduling",
         "preset": args.preset,
         "platform": args.platform,
         "policies": [policy.label for policy in policies],

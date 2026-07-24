@@ -316,6 +316,7 @@ def run_batch_group(
     recording_plan: RecordingPlan | None = None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
+    preparation_cache: Any,
 ):
     """Execute a prepared dispatch group through the active concrete runtime."""
 
@@ -328,6 +329,7 @@ def run_batch_group(
         recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+        preparation_cache=preparation_cache,
     )
     return finalize_batch_group(pending)
 
@@ -342,6 +344,7 @@ def enqueue_batch_group(
     recording_plan: RecordingPlan | None = None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
+    preparation_cache: Any,
 ):
     """Prepare and enqueue a batch group through the active concrete runtime."""
 
@@ -356,6 +359,7 @@ def enqueue_batch_group(
         recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+        preparation_cache=preparation_cache,
     )
 
 

@@ -80,6 +80,13 @@ Current focus after the P9 closeout:
   only to the membrane descriptor/source compiler. Axon templates must not own
   model defaults, aliases, equations, derived parameter formulas, or unit
   conversion contracts.
+- Keep membrane instances, composites, section assignments, layouts, axons,
+  populations, simulations, and protocol plans descriptive. Constructing or
+  querying their geometry must not normalize membrane parameters, load generated
+  modules, or compile a membrane model. That work begins during Runner-owned
+  preparation for `run()`, `estimate()`, or `inspect()`; explicit membrane
+  introspection such as `.params`, `.explain()`, and generated-code inspection
+  intentionally crosses the same compiler boundary.
 - treat a future NumPy/SciPy runtime as a bonus reference/debug backend, not the
   next product priority. Do not expose `axs.runtime.numpy` until it is executable
   through the complete simulation, estimate, and inspection lifecycle.
@@ -110,7 +117,7 @@ Current focus after the P9 closeout:
 | 9 - Cold-run/runtime benchmark closeout | Done | `cold_run_micro`, normalized scalar/batch spans, explicit hotpath chunk controls, and decisions to park larger optimization campaigns until realistic evidence exists. |
 | 10 - Model/compiler surface cleanup | Active next | Flatten membrane helper/diagnostic/explain surfaces, harden compiler/cache identity, and prepare recording-aware pruning/fusion contracts before deeper solver work. |
 | 11 - Realistic JAX solver benchmarking and optimization | Active next | Build realistic workflow evidence first, then optimize the current JAX preparation/lowering/kernel/result paths with validation gates. |
-| 12 - Studies, serialization, integration | Not started | Callable studies, reuse policies, retention policies, schemas, HPC, FEM/NRV integration. |
+| 12 - Studies, serialization, integration | Not started | Callable studies, reuse policies, retention policies, schemas, and FEM/NRV integration. Distributed Dask/multi-GPU/HPC execution is a later infrastructure-dependent phase. |
 
 ## 1.2 Active Gaps
 
@@ -879,6 +886,24 @@ report.plot_details()
 Root inspection helpers should not be public paths. Keep inspection on
 `AxonSimulation.inspect()` so planning, estimate, lowering, and report objects
 share the same simulation definition.
+
+`Runner.estimate()` and `Runner.inspect()` also accept composed runnable plans.
+Their composed reports keep peak memory for one scheduled execution separate
+from repeated sweep, threshold, or study work; sequential plan memory must not
+be presented as if every task were resident concurrently.
+
+`StudyPlan` is the public named dependency composition for existing runnable
+leaf plans. `StudyTask` declares stable task keys and prerequisites;
+`StudyResult` retains ordered in-memory task results. Studies execute through
+the same `Runner` scheduler as individual plans. Do not add a study-specific
+executor, persistence format, or retention policy before those contracts are
+defined and validated.
+
+Runner-owned reusable host state consists of population materialization,
+dispatch plans, and prepared cohorts. Concrete runtime caches for immutable
+compiled programs and persistent backend artifacts remain runtime-owned and may
+be shared across runners. `Runner.clear()` clears runner-owned host state; it
+must not erase persistent compiler/XLA/Triton caches.
 
 Current coverage:
 

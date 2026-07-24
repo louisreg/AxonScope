@@ -116,8 +116,8 @@ tracked archived solver-test wrappers.
   launchers plus the distinct P18 Nav clamp and full-cable validation runners.
   Removed the empty package marker and the false block-threshold CLI route
   that accepted an option only for real execution to reject it.
-- [x] `benchmark/dispatcher/` - retained the registered group scheduling
-  workload and removed its empty package marker.
+- [x] `benchmark/runner/` - owns the registered runner group-scheduling
+  workload after P20 removed the dispatcher execution facade.
 - [x] `benchmark/examples/` - retained the basic 06-08 gate, basic-08 startup
   instrumentation, runtime benchmark demonstration, and NRV example-01 gate.
   Removed example 02 from the benchmark matrix and the empty package marker.
@@ -485,11 +485,9 @@ anchors absolute imports of shared test helpers.
 - [x] `dispatcher/_records.py` - retained the two backend-to-result payloads:
   row records for retained outputs and compact cohort records for observer-only
   outputs; every field is consumed by assembly or public diagnostics.
-- [x] `dispatcher/execution.py` - now executes every valid dispatch group on
-  the canonical batch route. Removed the constant eligibility predicate,
-  unreachable unsupported branch, and ignored `record_observables` argument.
-  Raw pool execution now requires the runtime context prepared by the simulation
-  boundary instead of supporting a second context-free test route.
+- [x] `dispatcher/execution.py` - removed during P20 after group scheduling and
+  raw-record validation moved into the canonical `Runner`; backend execution
+  remains behind `runtime.execution`.
 - [x] `dispatcher/numeric_axis.py` - retained the backend-neutral dynamic-axis
   protocol and extracellular waveform implementation used by generic sweeps.
 - [x] `dispatcher/plan.py` - retained as the unique grouping, padding, and

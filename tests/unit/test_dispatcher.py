@@ -7,8 +7,7 @@ import numpy as np
 import pytest
 
 import axonfleet as axs
-import axonfleet.dispatcher.execution as dispatcher_execution
-import axonfleet.simulation as simulation_module
+import axonfleet.runner as runner_module
 import axonfleet.runtime.jax.group_runner as group_runner
 import axonfleet.runtime.jax.inputs.extracellular as input_batches
 import axonfleet.runtime.jax.kernels.double_cable as double_cable_kernel
@@ -38,9 +37,8 @@ from axonfleet.runtime.jax.inputs.intracellular import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
 )
-from axonfleet.dispatcher.execution import run_pool as _run_pool
 from axonfleet.dispatcher.plan import build_dispatch_plan
-from axonfleet.dispatcher.execution import DispatchSchedulingOptions
+from axonfleet.runner import _RunnerSchedulingOptions
 from axonfleet.dispatcher._records import DispatchCohortRecord
 from axonfleet.preparation.stimulation_rows import extracellular_stimulation_rows
 from axonfleet.preparation.membrane_rows import MembraneRowPlan
@@ -62,6 +60,7 @@ _CPU_RUNTIME_CONTEXT = SimpleNamespace(
     platform="cpu",
     solver_engine=resolve_cpu_solver_engine(axs.SolverPolicy()),
 )
+_PREPARED_COHORT_CACHE = group_preparation.PreparedCohortCache()
 
 
 def _clear_runtime_caches():
@@ -71,13 +70,41 @@ def _clear_runtime_caches():
 
 
 def _clear_prepared_cohort_caches():
-    group_preparation._PREPARED_COHORT_CACHE.clear()
-    group_preparation._PREPARED_COHORT_IDENTITY_CACHE.clear()
+    _PREPARED_COHORT_CACHE.clear()
 
 
-def run_pool(*args, **kwargs):
-    kwargs.setdefault("runtime_context", _CPU_RUNTIME_CONTEXT)
-    return _run_pool(*args, **kwargs)
+def run_pool(
+    axons,
+    *,
+    tsim_ms,
+    dt_ms,
+    runtime_context=None,
+    batch_options=None,
+    observers=None,
+    recording_plan=None,
+    progress=False,
+    dispatch_plan=None,
+    scheduling_options=None,
+):
+    if not axons:
+        raise ValueError("axons must contain at least one Axon.")
+    duration_ms = axs.units.to_ms(tsim_ms)
+    step_ms = axs.units.to_ms(dt_ms)
+    if duration_ms <= 0.0:
+        raise ValueError("tsim_ms must be > 0.")
+    if step_ms <= 0.0:
+        raise ValueError("dt_ms must be > 0.")
+    runner = axs.Runner(_scheduling_options=scheduling_options)
+    return runner._execute_dispatch_plan(
+        dispatch_plan or build_dispatch_plan(axons),
+        tsim_ms=duration_ms,
+        dt_ms=step_ms,
+        batch_options=batch_options,
+        observers=tuple(observers) if observers is not None else None,
+        recording_plan=recording_plan,
+        progress=progress,
+        runtime_context=runtime_context or _CPU_RUNTIME_CONTEXT,
+    )
 
 
 def _membrane_row_plan(group):
@@ -367,8 +394,8 @@ def test_run_pool_async_scheduler_enqueues_groups_before_waiting(monkeypatch):
             ),
         )
 
-    monkeypatch.setattr(dispatcher_execution, "enqueue_batch_group", fake_enqueue)
-    monkeypatch.setattr(dispatcher_execution, "finalize_batch_group", fake_finalize)
+    monkeypatch.setattr(runner_module, "enqueue_batch_group", fake_enqueue)
+    monkeypatch.setattr(runner_module, "finalize_batch_group", fake_finalize)
 
     result = run_pool(
         axons,
@@ -376,7 +403,7 @@ def test_run_pool_async_scheduler_enqueues_groups_before_waiting(monkeypatch):
         dt_ms=0.05,
         batch_options=BatchOptions.full(),
         dispatch_plan=plan,
-        scheduling_options=DispatchSchedulingOptions(
+        scheduling_options=_RunnerSchedulingOptions(
             async_groups=True,
             max_pending_groups=2,
         ),
@@ -496,19 +523,25 @@ def test_dispatch_group_reuses_static_cohort_metadata():
     assert group.empty_record_indices is group.empty_record_indices
 
 
-def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
+def test_runner_reuses_dispatch_plan_for_stable_population(monkeypatch):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
         for index in range(3)
     ]
-    first = dispatch_plan_module.build_dispatch_plan(axons)
+    simulation = axs.AxonSimulation(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+    )
+    runner = axs.Runner()
+    first = runner._dispatch_plan(simulation.plan())
 
     def fail_solver_rebuild(_simulation):
         raise AssertionError("stable pool should reuse the cached dispatch plan")
 
-    monkeypatch.setattr(dispatch_plan_module, "build_solver_axon", fail_solver_rebuild)
+    monkeypatch.setattr(runner_module, "build_dispatch_plan", fail_solver_rebuild)
 
-    second = dispatch_plan_module.build_dispatch_plan(axons)
+    second = runner._dispatch_plan(simulation.plan())
 
     assert second is first
 
@@ -537,9 +570,15 @@ def test_dispatch_plan_prepares_temporal_signature_once_per_row(monkeypatch):
     assert calls == len(axons)
 
 
-def test_dispatch_plan_cache_survives_amplitude_only_stimulus_replacement(monkeypatch):
+def test_runner_plan_cache_survives_amplitude_only_stimulus_replacement(monkeypatch):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    first = dispatch_plan_module.build_dispatch_plan([axon])
+    simulation = axs.AxonSimulation(
+        [axon],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+    )
+    runner = axs.Runner()
+    first = runner._dispatch_plan(simulation.plan())
     stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
@@ -555,14 +594,14 @@ def test_dispatch_plan_cache_survives_amplitude_only_stimulus_replacement(monkey
     def fail_solver_rebuild(_simulation):
         raise AssertionError("amplitude-only stimulus replacement should reuse the plan")
 
-    monkeypatch.setattr(dispatch_plan_module, "build_solver_axon", fail_solver_rebuild)
+    monkeypatch.setattr(runner_module, "build_dispatch_plan", fail_solver_rebuild)
 
-    second = dispatch_plan_module.build_dispatch_plan([axon])
+    second = runner._dispatch_plan(simulation.plan())
 
     assert second is first
 
 
-def test_axon_simulation_reuses_cached_dispatch_plan(monkeypatch):
+def test_axon_simulation_reuses_runner_dispatch_plan(monkeypatch):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
         for index in range(3)
@@ -579,33 +618,35 @@ def test_axon_simulation_reuses_cached_dispatch_plan(monkeypatch):
             ),
         ),
     )
-    first = simulation._dispatch_plan_for_run()
+    runner = simulation._execution_runner()
+    first = runner._dispatch_plan(simulation.plan())
 
     def fail_plan_rebuild(_axons):
         raise AssertionError("stable AxonSimulation should reuse its dispatch plan")
 
-    monkeypatch.setattr(simulation_module, "build_dispatch_plan", fail_plan_rebuild)
+    monkeypatch.setattr(runner_module, "build_dispatch_plan", fail_plan_rebuild)
 
-    second = simulation._dispatch_plan_for_run()
+    second = runner._dispatch_plan(simulation.plan())
 
     assert second is first
 
 
-def test_axon_simulation_stable_plan_hit_skips_identity_rebuild(monkeypatch):
+def test_runner_stable_plan_hit_skips_identity_rebuild(monkeypatch):
     simulation = axs.AxonSimulation(
         [_passive_double_cable_axon(amp_nA=0.1)],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
     )
-    first = simulation._dispatch_plan_for_run()
+    runner = simulation._execution_runner()
+    first = runner._dispatch_plan(simulation.plan())
 
     def fail_identity_rebuild(_axons):
         raise AssertionError("unchanged simulation should use the O(1) plan hit")
 
-    monkeypatch.setattr(simulation_module, "dispatch_plan_identity_key", fail_identity_rebuild)
+    monkeypatch.setattr(runner_module, "dispatch_plan_identity_key", fail_identity_rebuild)
 
-    assert simulation._dispatch_plan_for_run() is first
+    assert runner._dispatch_plan(simulation.plan()) is first
 
 
 def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():
@@ -701,6 +742,16 @@ def test_jax_group_runner_rejects_unknown_cable_mode():
     with pytest.raises(ValueError, match="expected 'single' or 'double'"):
         group_runner.enqueue_jax_batch_group(
             SimpleNamespace(mode="legacy"),
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.none(),
+        )
+
+
+def test_jax_group_runner_requires_runner_owned_preparation_cache():
+    with pytest.raises(RuntimeError, match="Runner-owned preparation cache"):
+        group_runner.enqueue_jax_batch_group(
+            SimpleNamespace(mode="single"),
             tsim_ms=0.1,
             dt_ms=0.05,
             batch_options=BatchOptions.none(),
@@ -961,7 +1012,7 @@ def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monk
         include_extracellular=True,
         include_area=True,
         materialized_axons=(
-            group_preparation.prepared_cohort_for_current_group(group).materialized_axons
+            _PREPARED_COHORT_CACHE.for_current_group(group).materialized_axons
         ),
         membrane_rows=_membrane_row_plan(group),
     )
@@ -1847,7 +1898,7 @@ def test_double_cable_batch_extracellular_stack_matches_row_runtime():
     ).membrane.dtype
 
     stacked = runtime_stacking._stack_extracellular_runtime(
-        group_preparation.prepared_cohort_for_current_group(group).materialized_axons,
+        _PREPARED_COHORT_CACHE.for_current_group(group).materialized_axons,
         dtype_local=dtype_local,
     )
 
@@ -2059,7 +2110,7 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     group = build_dispatch_plan([axon]).groups[0]
 
     _clear_prepared_cohort_caches()
-    first = group_preparation.prepared_cohort_for_group(group)
+    first = _PREPARED_COHORT_CACHE.for_group(group)
     stimulation = first.stimulations[0][0]
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
@@ -2072,7 +2123,7 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     )
     axon.add_extracellular_stimulation(stimulation=updated, replace=True)
 
-    second = group_preparation.prepared_cohort_for_group(group)
+    second = _PREPARED_COHORT_CACHE.for_group(group)
 
     assert second is not first
     assert second.x_positions_m is first.x_positions_m
@@ -2089,8 +2140,8 @@ def test_prepared_cohort_cache_reuses_spatial_rows_for_equivalent_new_pool():
     second_group = build_dispatch_plan([second_axon]).groups[0]
 
     _clear_prepared_cohort_caches()
-    first = group_preparation.prepared_cohort_for_group(first_group)
-    second = group_preparation.prepared_cohort_for_group(second_group)
+    first = _PREPARED_COHORT_CACHE.for_group(first_group)
+    second = _PREPARED_COHORT_CACHE.for_group(second_group)
 
     assert second is not first
     assert second.axons == (second_axon,)
@@ -2130,9 +2181,9 @@ def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
         with benchmark_span("inputs.positions"):
-            first = group_preparation.prepared_cohort_for_current_group(group)
+            first = _PREPARED_COHORT_CACHE.for_current_group(group)
         with benchmark_span("inputs.positions"):
-            second = group_preparation.prepared_cohort_for_current_group(group)
+            second = _PREPARED_COHORT_CACHE.for_current_group(group)
         report = axs.disable_benchmark(print_summary=False, save=False)
     finally:
         axs.disable_benchmark(print_summary=False, save=False)
@@ -2151,7 +2202,7 @@ def test_current_group_prepared_cohort_cache_refreshes_replaced_stimulus():
     group = build_dispatch_plan([axon]).groups[0]
 
     _clear_prepared_cohort_caches()
-    first = group_preparation.prepared_cohort_for_current_group(group)
+    first = _PREPARED_COHORT_CACHE.for_current_group(group)
 
     stimulation = axon.extracellular_stimulation
     drive = stimulation.drives[0]
@@ -2165,7 +2216,7 @@ def test_current_group_prepared_cohort_cache_refreshes_replaced_stimulus():
     )
     axon.add_extracellular_stimulation(stimulation=updated, replace=True)
 
-    second = group_preparation.prepared_cohort_for_current_group(group)
+    second = _PREPARED_COHORT_CACHE.for_current_group(group)
 
     assert second is not first
     assert second.stimulations == ((updated,),)
@@ -2609,7 +2660,7 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
 
     _clear_runtime_caches()
     materialized_axons = (
-        group_preparation.prepared_cohort_for_current_group(group).materialized_axons
+        _PREPARED_COHORT_CACHE.for_current_group(group).materialized_axons
     )
     membrane_rows = _membrane_row_plan(group)
     first = runtime_preparation.prepare_batch_runtime(

@@ -28,6 +28,21 @@ python benchmark/kaggle/run_kernel.py \
   --case-filter observer_only
 ```
 
+Run the P20 local Runner acceptance matrix, including 1024/4096 compact
+population cases:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonfleet-p20-runner-validation \
+  --script runner_plan_validation \
+  --preset gpu_smoke \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --scales 1024,4096 \
+  --memory-trace device
+```
+
 Submit and wait for a CPU-only Kaggle run:
 
 ```bash

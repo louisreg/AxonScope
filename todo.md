@@ -18,8 +18,8 @@ Updated on 2026-07-23 during the P19 source and public-surface audit.
 - Compact activation, latency, spike-count, bounded spike-time, and VmRaster
   observers are available. Dense recording remains a separate memory/performance
   concern.
-- P19A and P19B are closed. P19C is intentionally deferred; P20 and later work
-  remains future architecture or product expansion.
+- P19A and P19B are closed. P19C is intentionally deferred. P20 is active;
+  later phases remain future architecture or product expansion.
 
 ## Non-Negotiables
 
@@ -237,41 +237,85 @@ Updated on 2026-07-23 during the P19 source and public-surface audit.
 
 ## Future Architecture And Product Work
 
-### P20 - Lazy Runnable Plans And Distributed Runner
+### P20 - Lazy Runnable Plans And Local Runner
 
 Axons, populations, simulations, protocols, sweeps, and studies should produce
 immutable runnable plans. One runner executes one or many plans and owns all
 eager work. This replaces the current dispatcher/execution architecture; it is
 not a wrapper or a parallel optimized route.
 
-- [ ] Use Graphify to audit `Axon`, `AxonPopulation`, `AxonSimulation`,
+- [x] Use Graphify to audit `Axon`, `AxonPopulation`, `AxonSimulation`,
   protocols, studies, dispatch plans, preparation caches, runtime execution,
   results, inspection, and progress before defining the replacement.
-- [ ] Define one backend-neutral immutable `RunnablePlan` contract plus
-  composed plans for populations, numeric axes, sweeps, recruitment, and
-  studies. Plans describe work and expected results but allocate nothing.
-- [ ] Make all work outside the runner lazy. Defer numerical materialization,
+- [x] Complete the first replacement slice: add immutable `SimulationPlan` and
+  composed `NumericAxisPlan`; make `Runner` own dispatch-plan reuse, execution
+  context, runtime invocation, estimate/inspection entry, and canonical result
+  assembly; remove the duplicate global dispatch-plan cache and the execution
+  lifecycle from `simulation.py`. Record the migration audit in
+  `docs/architecture/p20_runner_audit_2026_07_23.md`.
+- [x] Complete the second replacement slice: add generic immutable `SweepPlan`;
+  make pool and recruitment sweeps build it; move numeric-axis preparation,
+  value chunking, progress, and observation assembly into `Runner`; remove the
+  protocol-private numeric sweep plan and `AxonSimulation._run_numeric_axis()`.
+- [x] Complete the third replacement slice: add immutable `ThresholdPlan`;
+  make `find_threshold()` build it; move callable-bound resolution, per-row
+  bisection, progress, solver execution, and `ThresholdCurve` assembly into
+  `Runner`; remove the protocol-owned threshold execution loop.
+- [x] Complete the fourth replacement slice: move synchronous and bounded
+  asynchronous group scheduling into `Runner`; remove the raw `run_pool()`
+  facade and `dispatcher/execution.py`; keep backend group execution solely
+  behind `runtime.execution`.
+- [x] Complete the fifth replacement slice: add immutable `PopulationPlan`;
+  keep `AxonSimulation` construction descriptive; make `Runner` exclusively
+  materialize and cache `AxonPopulation` for run, estimate, inspect, and
+  explicit population access; reuse it across composed protocol execution.
+- [x] Complete the sixth replacement slice: add a backend-neutral named task
+  graph; replace `run_many()`'s tuple loop with stable dependency
+  execution; retain completed results in structured fail-fast errors; add
+  cooperative cancellation between tasks and protocol iterations while
+  allowing in-flight kernels to finish safely.
+- [x] Complete the seventh replacement slice: make `Runner.estimate()` and
+  `Runner.inspect()` consume simulation, numeric-axis, sweep, threshold, and
+  study plans; preserve plain-simulation reports; report one-execution peak
+  memory separately from exact or bounded repeated simulation work.
+- [x] Complete the backend-neutral immutable `RunnablePlan` family with study
+  plans. Existing simulation, numeric-axis, pool sweep, recruitment, and
+  threshold plans describe work without lowering solver groups or allocating
+  runtime arrays.
+- [x] Converge the provisional graph vocabulary into canonical `StudyTask`,
+  `StudyPlan`, and `StudyResult`; execute named study DAGs through the same
+  runner and leave retention, persistence, and result-dependent factories for
+  their dedicated future contracts.
+- [x] Make all work outside the runner lazy. Defer numerical materialization,
   grouping, signatures, generated-code loading, device placement, compilation,
   scheduling, and result allocation until execution or explicit
-  `estimate()`/`inspect()`.
-- [ ] Implement one runner that owns dependency ordering, compatible grouping,
+  `estimate()`/`inspect()`. Membrane `.params`, `.explain()`, and generated-code
+  inspection are explicit compiler introspection and intentionally materialize
+  their requested artifacts.
+- [x] Implement one runner that owns dependency ordering, compatible grouping,
   reusable prepared state, execution policy, cancellation, progress, failures,
   and deterministic canonical result assembly.
-- [ ] Replace the current simulation/protocol dispatcher and execution routes
+- [x] Replace the current simulation/protocol dispatcher and execution routes
   once validated, then remove superseded builders, caches, wrappers, and call
   paths. Preserve `AxonSimulation(...).run()` unless an API change is discussed
   first.
-- [ ] Add backend-neutral scheduling for local multi-GPU and HPC workers,
-  including topology, memory budgets, affinity, cache locality, remote artifact
-  retention, failure recovery, and reproducible placement.
-- [ ] Support synchronous execution first. Retain asynchronous device overlap
-  only for independent heterogeneous groups when it reduces device idle time
-  and improves end-to-end runtime with bounded pending memory.
 - [ ] Validate single and composed plans, mixed populations, native numeric
-  axes, studies, cache invalidation, cancellation, CPU, single/multi-GPU, and an
-  HPC smoke path. Benchmark fresh miss, structural reuse, dynamic operands,
-  transfers, compilation, solve, result assembly, RSS, device memory, scheduler
+  axes, studies, cache invalidation, cancellation, local CPU, and single GPU.
+  Benchmark fresh miss, structural reuse, dynamic operands, transfers,
+  compilation, solve, result assembly, RSS, device memory, local scheduler
   overhead, and Naxon=1024/4096 scaling.
+- [ ] After benchmark acceptance, audit every runnable example and the public
+  exports they teach. Remove or rewrite examples that expose superseded,
+  ambiguous, redundant, or confusing workflows; add a concise didactic path
+  for `SimulationPlan`, numeric/sweep plans, `StudyPlan`, shared `Runner`
+  reuse, estimate/inspect, cancellation, and canonical results. Simplify the
+  public API so examples teach one supported way to describe and execute each
+  concept, without convenience paths that create a competing workflow.
+- [ ] After CPU/GPU validation and before closing P20, run a final Graphify
+  convergence audit over plans, Runner, dispatcher lowering, preparation,
+  runtime execution, caches, protocols, estimation, inspection, and results.
+  Remove paths, names, builders, wrappers, fallbacks, or cache owners made
+  unused or redundant by P20, then rerun the proportional validation gates.
 
 ### Full Recording And Membrane Introspection
 
@@ -326,6 +370,31 @@ composable study plans, retention, and persisted results above those protocols.
 - [ ] Evaluate optional optimization/search adapters for grid/random sampling
   and surrogate-guided search. Keep the study contract independent of
   scikit-learn and compare it with SciPy or dedicated optimization packages.
+
+### Distributed Runner, Dask, Multi-GPU, And HPC
+
+This is a future improvement, not part of P20 completion. Do not implement or
+freeze distributed contracts until a representative multi-GPU or HPC
+environment is available for correctness, failure, and performance testing.
+
+- [ ] Revisit the complete distributed-execution design from runnable-plan and
+  artifact boundaries. Evaluate Dask Distributed as the primary candidate and
+  compare only where necessary with MPI, Ray, or scheduler-native job arrays.
+  Preserve one `Runner` and one plan/result vocabulary rather than adding a
+  parallel public execution API.
+- [ ] Define worker topology, CPU/GPU resources, memory budgets, affinity, data
+  and compiled-cache locality, artifact transport/retention, deterministic
+  placement, cancellation, retries, failure recovery, and reproducibility.
+- [ ] Decide which objects cross process or cluster boundaries. Keep backend
+  runtime state and device arrays local to workers; define serialization and
+  provenance together with the study/persistence contracts.
+- [ ] Evaluate bounded asynchronous overlap only for independent heterogeneous
+  groups and only when it improves end-to-end runtime without unbounded pending
+  host/device memory.
+- [ ] Validate on real local multi-GPU and HPC infrastructure, including worker
+  loss and retry behavior, before advertising support. Benchmark scheduler and
+  transfer overhead, cold/warm cache locality, scaling efficiency, memory, and
+  numerical equivalence against the local Runner.
 
 ### External Integrations And Examples
 

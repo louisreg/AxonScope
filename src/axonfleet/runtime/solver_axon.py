@@ -9,7 +9,7 @@ import numpy as np
 
 from axonfleet.axons.flattened import FlattenedLayout, flatten_layout
 from axonfleet.axons.formulation import Formulation, resolve_formulation
-from axonfleet.membranes.model import MembraneModel
+from axonfleet.membranes.model import MembraneModel, ensure_membrane_model
 
 if TYPE_CHECKING:
     from axonfleet.axon_instance import AxonInstance
@@ -33,6 +33,25 @@ def _uniform_periaxonal(
         np.full((Nx,), float(xg_S_cm2), dtype=dtype),
         np.full((Nx,), float(xc_uF_cm2), dtype=dtype),
     )
+
+
+def _resolve_membrane_descriptions(
+    descriptions: tuple[object, ...],
+) -> tuple[MembraneModel, ...]:
+    """Resolve each distinct descriptive object once at the runtime boundary."""
+
+    by_identity: dict[int, tuple[object, MembraneModel]] = {}
+    resolved: list[MembraneModel] = []
+    for description in descriptions:
+        identity = id(description)
+        cached = by_identity.get(identity)
+        if cached is None or cached[0] is not description:
+            descriptor = ensure_membrane_model(description)
+            by_identity[identity] = (description, descriptor)
+        else:
+            descriptor = cached[1]
+        resolved.append(descriptor)
+    return tuple(resolved)
 
 
 @dataclass(frozen=True)
@@ -129,8 +148,9 @@ def build_solver_axon(axon: "Axon | AxonInstance") -> SolverAxon:
     flat = flatten_layout(axon.layout)
     if flat.Nx < 2:
         raise ValueError(f"Axon layout requires at least 2 numerical compartments, got {flat.Nx}.")
+    membrane_models = _resolve_membrane_descriptions(flat.membranes)
     formulation = resolve_formulation(flat, getattr(axon, "formulation", None))
-    dtype = np.dtype(flat.membrane_models[0].dtype)
+    dtype = np.dtype(membrane_models[0].dtype)
 
     x_um = np.asarray(flat.x_um, dtype=dtype)
     compartment_lengths_um = np.asarray(flat.lengths_um, dtype=dtype)
@@ -162,7 +182,7 @@ def build_solver_axon(axon: "Axon | AxonInstance") -> SolverAxon:
         diam_um=diam_um,
         Ra_ohm_cm=Ra_ohm_cm,
         Cm_uF_cm2=Cm_uF_cm2,
-        membrane_models=tuple(flat.membrane_models),
+        membrane_models=membrane_models,
         section_names=tuple(flat.section_names),
         section_indices=np.asarray(flat.section_indices, dtype=np.int32),
         section_tags=tuple(flat.section_tags),

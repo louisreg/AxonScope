@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import pickle
-from collections import OrderedDict
 from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Any, Iterable, Literal, Sequence
@@ -280,32 +279,13 @@ class _PreparedDispatchRow:
     stimulation_temporal_signature: tuple[Any, ...]
 
 
-_DISPATCH_PLAN_CACHE: OrderedDict[tuple[Any, ...], DispatchPlan] = OrderedDict()
-_DISPATCH_PLAN_CACHE_MAX_SIZE = 64
-
-
 def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
     """Normalize and group axon simulations before execution."""
 
     simulations = tuple(as_axon_instance(axon) for axon in axons)
     with benchmark_span("dispatch.build_plan", pool_size=len(simulations)):
-        with benchmark_span("dispatch.build_plan.cache_key"):
+        with benchmark_span("dispatch.build_plan.prepare_rows"):
             prepared_rows = _prepare_dispatch_rows(simulations)
-            cache_key = _dispatch_plan_cache_key(prepared_rows)
-        cached = _DISPATCH_PLAN_CACHE.get(cache_key)
-        if cached is not None:
-            _DISPATCH_PLAN_CACHE.move_to_end(cache_key)
-            record_benchmark_metadata(
-                dispatch_plan_cache="hit",
-                item_count=len(cached.items),
-                group_count=len(cached.groups),
-                group_sizes=[group.size for group in cached.groups],
-                group_modes=[group.mode for group in cached.groups],
-                group_nx=[group.nx for group in cached.groups],
-            )
-            return cached
-
-        record_benchmark_metadata(dispatch_plan_cache="miss")
         with benchmark_span("dispatch.build_plan.normalize_items"):
             items = _normalize_dispatch_items(prepared_rows)
         with benchmark_span("dispatch.build_plan.group_items"):
@@ -359,7 +339,6 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
             group_nx=[group.nx for group in groups],
         )
         plan = DispatchPlan(items=items, groups=groups)
-        _store_dispatch_plan_cache(cache_key, plan)
         return plan
 
 
@@ -385,39 +364,6 @@ def dispatch_plan_identity_key(
             )
             for simulation in simulations
         ),
-    )
-
-
-def _dispatch_plan_cache_key(
-    prepared_rows: Sequence[_PreparedDispatchRow],
-) -> tuple[Any, ...]:
-    """Return the stable execution-layout key for a pool.
-
-    The key is intentionally tied to `AxonInstance` identity. This makes the
-    cache useful for iterative protocols that mutate only stimuli on a stable
-    pool, while avoiding accidental reuse when callers pass fresh bare `Axon`
-    objects or rebuild simulation rows.
-    """
-
-    return (
-        "dispatch_plan_v2",
-        tuple(
-            _dispatch_plan_row_cache_key(prepared_row)
-            for prepared_row in prepared_rows
-        ),
-    )
-
-
-def _dispatch_plan_row_cache_key(
-    prepared_row: _PreparedDispatchRow,
-) -> tuple[Any, ...]:
-    simulation = prepared_row.simulation
-    return (
-        id(simulation),
-        prepared_row.solver_axon_cache_key,
-        prepared_row.stimulation_temporal_signature,
-        float(getattr(simulation, "v_init", 0.0)),
-        float(getattr(simulation, "temperature", 0.0)),
     )
 
 
@@ -450,13 +396,6 @@ def _dispatch_plan_row_identity_key(
         float(getattr(simulation, "v_init", 0.0)),
         float(getattr(simulation, "temperature", 0.0)),
     )
-
-
-def _store_dispatch_plan_cache(key: tuple[Any, ...], plan: DispatchPlan) -> None:
-    _DISPATCH_PLAN_CACHE[key] = plan
-    _DISPATCH_PLAN_CACHE.move_to_end(key)
-    while len(_DISPATCH_PLAN_CACHE) > _DISPATCH_PLAN_CACHE_MAX_SIZE:
-        _DISPATCH_PLAN_CACHE.popitem(last=False)
 
 
 def _normalize_dispatch_items(

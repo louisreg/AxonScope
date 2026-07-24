@@ -18,7 +18,12 @@ from axonfleet.runtime.execution import (
     benchmark_vm_raster_definitions,
     solver_route_from_execution_policy,
 )
-from axonfleet.dispatcher.plan import DispatchGroup, build_dispatch_plan
+from axonfleet.dispatcher.numeric_axis import NumericAxisInput
+from axonfleet.dispatcher.plan import (
+    DispatchGroup,
+    build_dispatch_plan,
+    expand_dispatch_plan_for_numeric_axis,
+)
 from axonfleet.inspection.records import (
     AssemblyDetailInspection,
     DispatchGroupInspection,
@@ -27,6 +32,8 @@ from axonfleet.inspection.records import (
     MemoryInspection,
     MembraneSourceInspection,
     PaddingInspection,
+    PlanInspection,
+    PlanInspectionComponent,
     PlanningInspection,
     PreparationInspection,
     ProbeInspection,
@@ -55,6 +62,7 @@ def inspect_simulation(
     observers: Sequence[Any] | None = None,
     execution_policy: ExecutionPolicy | None = None,
     print_summary: bool = False,
+    numeric_axis: NumericAxisInput | None = None,
 ) -> SimulationInspection:
     """Inspect planning, preparation, lowering, kernels, and result assembly."""
 
@@ -64,6 +72,8 @@ def inspect_simulation(
     dt_ms = units.to_ms(dt)
     step_count = simulation_step_count(duration_ms, dt_ms)
     plan = build_dispatch_plan(instances)
+    if numeric_axis is not None:
+        plan = expand_dispatch_plan_for_numeric_axis(plan, numeric_axis)
     resolved_batch_options = _inspection_batch_options(
         recording=recording,
         batch_options=batch_options,
@@ -96,7 +106,7 @@ def inspect_simulation(
     )
     inspection = SimulationInspection(
         planning=PlanningInspection(
-            axon_count=len(instances),
+            axon_count=len(plan.items),
             duration_ms=duration_ms,
             dt_ms=dt_ms,
             step_count=step_count,
@@ -607,6 +617,8 @@ __all__ = [
     "MemoryInspection",
     "MembraneSourceInspection",
     "PaddingInspection",
+    "PlanInspection",
+    "PlanInspectionComponent",
     "PlanningInspection",
     "ProbeInspection",
     "PreparationInspection",

@@ -14,6 +14,9 @@ from axonfleet.dispatcher.plan import dispatch_plan_identity_key
 from benchmark.campaigns.double_cable_solver_policy import (
     main as run_solver_policy_campaign,
 )
+from benchmark.analysis.runner_plan_validation import (
+    main as compare_runner_plan_validation,
+)
 from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
@@ -64,7 +67,8 @@ def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
         "threshold_curves",
         "recruitment_curves",
         "recruitment_amplitude_batch",
-        "dispatcher_group_scheduling",
+        "runner_group_scheduling",
+        "runner_plan_validation",
         "single_cable_triton_gate",
         "membrane_temporal",
         "kinetic_transition_tables",
@@ -81,9 +85,118 @@ def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
     assert "kinetic_transition_tables" in out
     assert "recruitment_curves" in out
     assert "recruitment_amplitude_batch" in out
-    assert "dispatcher_group_scheduling" in out
+    assert "runner_group_scheduling" in out
+    assert "runner_plan_validation" in out
     assert "quick" in out
     assert "gpu_realistic" in out
+
+
+def test_runner_plan_validation_dry_run_writes_local_runner_matrix(
+    tmp_path: Path,
+    capsys,
+):
+    assert (
+        run_benchmark(
+            [
+                "--script",
+                "runner_plan_validation",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--scales",
+                "4,8",
+                "--dry-run",
+                "--output",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+
+    assert "dry-run: runner_plan_validation" in capsys.readouterr().out
+    rows = list(csv.DictReader((tmp_path / "cases.csv").open()))
+    assert [row["case"] for row in rows] == [
+        "study_cold_warm_clear",
+        "cancellation",
+        "cache_invalidation",
+        "population_scale",
+        "population_scale",
+    ]
+    assert [row["n_axons"] for row in rows[-2:]] == ["4", "8"]
+
+
+def test_runner_plan_validation_comparison_checks_cpu_gpu_evidence(tmp_path: Path):
+    signature = {
+        "keys": ["simple", "mixed", "numeric_axis", "sweep", "threshold"],
+        "simple_voltage": [
+            {
+                "shape": [2, 1],
+                "minimum_mV": -70.0,
+                "maximum_mV": -69.0,
+                "final_mV": -69.0,
+                "sum_mV": -139.0,
+                "dispatch_method": "batch",
+            }
+        ],
+        "mixed_voltage": [],
+        "numeric_axis_activation": [False, True],
+        "sweep_activation": [[False], [True]],
+        "threshold": {"status": ["no_activation"], "threshold_uA": [None], "tested_uA": [[0.0]]},
+    }
+    stages = {"kernel.wait": 1.0}
+    base = {
+        "status": "passed",
+        "plan": {"name": "validation"},
+        "scales": [4],
+        "cache_clear": {"passed": True},
+        "cache_invalidation": {"passed": True},
+        "cancellation": {"passed": True},
+        "runs": [
+            {
+                "label": "study_cold",
+                "wall_ms": 10.0,
+                "stages_ms": stages,
+                "signature": signature,
+            }
+        ],
+        "scale_validation": [
+            {
+                "n_axons": 4,
+                "passed": True,
+                "cold": {
+                    "label": "scale_4_cold",
+                    "wall_ms": 5.0,
+                    "stages_ms": stages,
+                    "signature": {
+                        "rows": 4,
+                        "activated_count": 0,
+                        "first": [False] * 4,
+                        "last": [False] * 4,
+                    },
+                },
+                "warm": {
+                    "label": "scale_4_warm",
+                    "wall_ms": 2.0,
+                    "stages_ms": stages,
+                    "signature": {},
+                },
+            }
+        ],
+    }
+    cpu = {**base, "platform": "cpu"}
+    gpu = {**base, "platform": "gpu"}
+    cpu_path = tmp_path / "cpu.json"
+    gpu_path = tmp_path / "gpu.json"
+    cpu_path.write_text(json.dumps(cpu), encoding="utf-8")
+    gpu_path.write_text(json.dumps(gpu), encoding="utf-8")
+    output = tmp_path / "comparison"
+
+    assert compare_runner_plan_validation(
+        [str(cpu_path), str(gpu_path), "--output", str(output)]
+    ) == 0
+    comparison = json.loads((output / "comparison.json").read_text())
+    assert comparison["status"] == "passed"
 
 
 def test_curve_presets_have_explicit_scale_and_execution_defaults():

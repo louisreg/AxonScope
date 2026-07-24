@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import get_args
 
@@ -7,9 +8,12 @@ import pytest
 
 import axonfleet as axs
 import axonfleet.protocols.recruitment as recruitment_protocols
+import axonfleet.runner as runner_module
 from axonfleet.protocols import observer_path as observer_protocols
+from axonfleet.protocols import progress as protocol_progress
 from axonfleet.protocols import sweep as sweep_protocols
 from axonfleet.protocols import threshold as threshold_protocols
+from axonfleet.protocols.types import NumericAxisUpdate
 from axonfleet.results import VM_RASTER_OBSERVATION_KEY, VmRasterResult
 from axonfleet.results.pool import _ResultBlock
 from axonfleet.results.vm_raster import activation_values_from_vm_raster
@@ -115,6 +119,27 @@ def _observer_only_cohort(activated, *, input_indices):
 
 
 def _patch_simulation_runner(monkeypatch, runner):
+    @dataclass(frozen=True)
+    class FakePopulation:
+        instances: tuple
+
+        def __len__(self):
+            return len(self.instances)
+
+    @dataclass(frozen=True)
+    class FakeSimulationPlan:
+        population: FakePopulation
+        kwargs: dict
+        progress: bool = False
+
+        @property
+        def axons(self):
+            return self.population.instances
+
+        @property
+        def expected_rows(self):
+            return len(self.axons)
+
     class FakeAxonSimulation:
         def __init__(self, axons, **kwargs):
             self.axons = axons
@@ -123,11 +148,101 @@ def _patch_simulation_runner(monkeypatch, runner):
         def run(self):
             return runner(self.axons, **self.kwargs)
 
-        def _run_numeric_axis(self, axis_input):
-            return runner(self.axons, axis_input=axis_input, **self.kwargs)
+        def plan(self):
+            return FakeSimulationPlan(
+                FakePopulation(tuple(self.axons)),
+                dict(self.kwargs),
+                self.kwargs.get("progress", False),
+            )
+
+    class FakeRunner:
+        def _population(self, plan):
+            if isinstance(plan, axs.PopulationPlan):
+                source = plan.source
+                if isinstance(source, FakePopulation):
+                    return source
+                if isinstance(source, tuple):
+                    return FakePopulation(source)
+                return FakePopulation((source,))
+            return plan
+
+        def run(self, plan):
+            if isinstance(plan, axs.ThresholdPlan):
+                from axonfleet.runner import Runner as RealRunner
+
+                return RealRunner._run_threshold(self, plan, cancellation=None)
+            if isinstance(plan, FakeSimulationPlan):
+                kwargs = dict(plan.kwargs)
+                kwargs["progress"] = plan.progress
+                return runner(self._population(plan.population).instances, **kwargs)
+            if not isinstance(plan, axs.SweepPlan):
+                raise TypeError(type(plan).__name__)
+            rows = []
+            progress_display = protocol_progress._SweepProgress(plan.progress)
+            numeric = isinstance(plan.update, NumericAxisUpdate)
+            builder = (
+                plan.update.prepare_numeric_axis(plan.source.axons)
+                if numeric
+                else None
+            )
+            first_execution = True
+            try:
+                for start, values in plan.value_batches():
+                    progress_display.begin(
+                        label="Pool sweep",
+                        current_index=start,
+                        values=plan.values,
+                        completed_rows=rows,
+                        progress_summary=plan.progress_summary,
+                    )
+                    execution_kwargs = dict(plan.source.kwargs)
+                    execution_kwargs["progress"] = (
+                        plan.source.progress if first_execution else False
+                    )
+                    first_execution = False
+                    if builder is not None:
+                        result = runner(
+                            plan.source.axons,
+                            axis_input=builder.numeric_axis_input(values),
+                            **execution_kwargs,
+                        )
+                        decoded = np.asarray(plan.decode(result)).reshape(
+                            (len(values), plan.source.expected_rows)
+                        )
+                        rows.extend(decoded)
+                    else:
+                        value = values[0]
+                        updated_rows = []
+                        for row in plan.source.axons:
+                            updated = plan.update(row, value)
+                            updated_rows.append(row if updated is None else updated)
+                        result = runner(tuple(updated_rows), **execution_kwargs)
+                        rows.append(np.asarray(plan.decode(result)))
+                    for offset in range(len(values)):
+                        progress_display.update(
+                            label="Pool sweep",
+                            current_index=start + offset,
+                            values=plan.values,
+                            completed_rows=rows,
+                            progress_summary=plan.progress_summary,
+                        )
+            finally:
+                progress_display.close()
+            return axs.protocols.PoolSweepResult(
+                values=plan.values,
+                observations=np.asarray(rows),
+            )
+
+        def _run_leaf(self, plan, *, cancellation):
+            del cancellation
+            return self.run(plan)
 
     for module in (observer_protocols, sweep_protocols, threshold_protocols):
         monkeypatch.setattr(module, "AxonSimulation", FakeAxonSimulation)
+    monkeypatch.setattr(sweep_protocols, "Runner", FakeRunner)
+    monkeypatch.setattr(recruitment_protocols, "Runner", FakeRunner)
+    monkeypatch.setattr(threshold_protocols, "Runner", FakeRunner)
+    monkeypatch.setattr(runner_module, "AxonPopulation", FakePopulation)
 
 
 def _extracellular_update_pool(count=2):
@@ -230,11 +345,9 @@ def test_extracellular_waveform_axis_prepares_selected_multi_drive_only():
     assert row.extracellular_stimulation is source
 
 
-def test_recruitment_reuses_one_observer_simulation_for_typed_waveform(monkeypatch):
+def test_recruitment_plan_keeps_typed_waveforms_lazy():
     pool = _extracellular_update_pool()
     factory_values = []
-    build_calls = []
-    evaluate_calls = []
 
     def waveform(value):
         value_uA = float(value.to(axs.uA).magnitude)
@@ -245,37 +358,10 @@ def test_recruitment_reuses_one_observer_simulation_for_typed_waveform(monkeypat
             amplitude=-value,
         )
 
-    def build_simulation(updated_pool, **kwargs):
-        build_calls.append((updated_pool, kwargs))
-        return SimpleNamespace(progress=kwargs.get("progress", False)), "activation"
-
-    def evaluate_numeric_axis(simulation, activation, axis_input):
-        evaluate_calls.append((simulation, activation, axis_input))
-        return np.asarray(
-            [
-                np.full(
-                    (len(pool),),
-                    abs(float(np.min(waveform.y))) * 1e6 >= 2.0,
-                    dtype=bool,
-                )
-                for waveform in axis_input.waveforms
-            ]
-        )
-
-    monkeypatch.setattr(
-        observer_protocols,
-        "_build_activation_observer_simulation",
-        build_simulation,
-    )
-    monkeypatch.setattr(
-        observer_protocols,
-        "_evaluate_activation_observer_numeric_axis",
-        evaluate_numeric_axis,
-    )
-
-    curve = axs.protocols.recruitment_sweep(
+    update = axs.protocols.ExtracellularWaveformUpdate(waveform)
+    plan = axs.protocols.recruitment_sweep_plan(
         pool,
-        update=axs.protocols.ExtracellularWaveformUpdate(waveform),
+        update=update,
         values=np.asarray([1.0, 2.0, 3.0]) * axs.uA,
         duration=1.0 * axs.ms,
         dt=0.1 * axs.ms,
@@ -283,17 +369,28 @@ def test_recruitment_reuses_one_observer_simulation_for_typed_waveform(monkeypat
         recording=axs.Recording.none(),
     )
 
-    assert factory_values == [1.0, 2.0, 3.0]
-    assert len(build_calls) == 1
-    assert len(evaluate_calls) == 3
-    assert all(call[0] is evaluate_calls[0][0] for call in evaluate_calls)
-    assert [call[1] for call in evaluate_calls] == ["activation"] * 3
-    assert [call[2].size for call in evaluate_calls] == [1, 1, 1]
-    assert evaluate_calls[0][0].progress is False
-    np.testing.assert_array_equal(
-        curve.activated,
-        [[False, False], [True, True], [True, True]],
-    )
+    assert isinstance(plan, axs.SweepPlan)
+    assert plan.update is update
+    assert plan.source.population.source == pool
+    assert plan.expected_rows == 6
+    assert [len(values) for _, values in plan.value_batches()] == [1, 1, 1]
+    assert factory_values == []
+
+
+def test_recruitment_plan_validates_current_values_directly():
+    pool = _extracellular_update_pool()
+    update = axs.protocols.ExtracellularWaveformUpdate(lambda value: value)
+
+    with pytest.raises(TypeError, match="current"):
+        axs.protocols.recruitment_sweep_plan(
+            pool,
+            update=update,
+            values=np.asarray([1.0, 2.0]) * axs.mV,
+            duration=1.0 * axs.ms,
+            dt=0.1 * axs.ms,
+            criterion=axs.analysis.Activation(),
+            recording=axs.Recording.none(),
+        )
 
 
 def test_vm_raster_shared_activation_decoder_respects_blanking_and_probe_mask():
@@ -664,7 +761,7 @@ def test_recruitment_sweep_rejects_opaque_batched_update():
     assert not any(hasattr(row, "tested_current_nA") for row in pool)
 
 
-def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
+def test_recruitment_plan_chunks_batched_observer_amplitudes_lazily():
     criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
@@ -672,7 +769,6 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
     )
     pool = _extracellular_update_pool()
     factory_values = []
-    simulations = []
 
     def waveform(value):
         factory_values.append(float(value.to(axs.nA).magnitude))
@@ -682,34 +778,7 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
             amplitude=-value,
         )
 
-    def build_simulation(updated_pool, **kwargs):
-        simulation = SimpleNamespace(progress=kwargs.get("progress", False))
-        simulations.append((simulation, tuple(id(row) for row in updated_pool)))
-        return simulation, "activation"
-
-    def evaluate_numeric_axis(_simulation, _activation, axis_input):
-        return np.asarray(
-            [
-                [
-                    abs(float(np.min(waveform.y))) * 1e9 >= 0.5,
-                    abs(float(np.min(waveform.y))) * 1e9 >= 1.5,
-                ]
-                for waveform in axis_input.waveforms
-            ]
-        )
-
-    monkeypatch.setattr(
-        observer_protocols,
-        "_build_activation_observer_simulation",
-        build_simulation,
-    )
-    monkeypatch.setattr(
-        observer_protocols,
-        "_evaluate_activation_observer_numeric_axis",
-        evaluate_numeric_axis,
-    )
-
-    curve = axs.protocols.recruitment_sweep(
+    plan = axs.protocols.recruitment_sweep_plan(
         pool,
         update=axs.protocols.ExtracellularWaveformUpdate(waveform),
         values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
@@ -722,14 +791,12 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
         amplitude_batch_size=2,
     )
 
-    np.testing.assert_allclose(factory_values, [0.0, 1.0, 2.0])
-    assert len(simulations) == 1
-    assert simulations[0][1] == tuple(id(row) for row in pool)
-    assert simulations[0][0].progress is False
-    np.testing.assert_array_equal(
-        curve.activated,
-        [[False, False], [True, False], [True, True]],
-    )
+    batches = tuple(plan.value_batches())
+    assert [start for start, _ in batches] == [0, 2]
+    assert [len(values) for _, values in batches] == [2, 1]
+    assert plan.source.population.source == pool
+    assert plan.source.progress == "plain"
+    assert factory_values == []
 
 
 def test_recruitment_batch_planning_is_separate_from_execution():
@@ -741,20 +808,28 @@ def test_recruitment_batch_planning_is_separate_from_execution():
             amplitude=-value,
         )
     )
-    plan = sweep_protocols._plan_numeric_pool_sweep(
+    plan = axs.protocols.recruitment_sweep_plan(
         pool,
         update=update,
         values=tuple(np.asarray([0.0, 1.0, 2.0]) * axs.nA),
-        value_batch_size=2,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=axs.analysis.Activation(),
+        recording=axs.Recording.none(),
+        batch_amplitudes=True,
+        amplitude_batch_size=2,
     )
 
-    assert plan.source_pool_size == 2
-    assert plan.source_pool == pool
+    batches = tuple(plan.value_batches())
+    assert plan.source.expected_rows == 2
+    assert plan.source.population.source == pool
     assert plan.update is update
-    assert [batch.start_index for batch in plan.batches] == [0, 2]
-    assert [len(batch.values) for batch in plan.batches] == [2, 1]
-    assert all(batch.values[0] is plan.values[batch.start_index] for batch in plan.batches)
-    assert tuple(id(row) for row in plan.source_pool) == tuple(id(row) for row in pool)
+    assert [start for start, _ in batches] == [0, 2]
+    assert [len(values) for _, values in batches] == [2, 1]
+    assert all(values[0] is plan.values[start] for start, values in batches)
+    assert tuple(id(row) for row in plan.source.population.source) == tuple(
+        id(row) for row in pool
+    )
 
 
 def test_recruitment_numeric_waveform_axis_matches_single_value_chunks():
@@ -929,7 +1004,7 @@ def test_recruitment_double_cable_numeric_axis_supports_multiple_drives():
     np.testing.assert_array_equal(full.activated, one.activated)
 
 
-def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatch):
+def test_recruitment_plan_can_batch_double_cable_observer_amplitudes():
     criterion = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
@@ -947,8 +1022,6 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
         stimulation=_extracellular_update_pool()[0].extracellular_stimulation
     )
     pool = (row,)
-    calls = []
-
     update = axs.protocols.ExtracellularWaveformUpdate(
         lambda value: axs.Stimulus.pulse(
             start=0.2 * axs.ms,
@@ -957,26 +1030,7 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
         )
     )
 
-    def build_simulation(updated_pool, **_kwargs):
-        calls.append(tuple(updated_pool))
-        return SimpleNamespace(progress=False), "activation"
-
-    def evaluate_numeric_axis(_simulation, _activation, axis_input):
-        return np.asarray(
-            [
-                [abs(float(np.min(waveform.y))) * 1e9 >= 0.5]
-                for waveform in axis_input.waveforms
-            ]
-        )
-
-    monkeypatch.setattr(observer_protocols, "_build_activation_observer_simulation", build_simulation)
-    monkeypatch.setattr(
-        observer_protocols,
-        "_evaluate_activation_observer_numeric_axis",
-        evaluate_numeric_axis,
-    )
-
-    curve = axs.protocols.recruitment_sweep(
+    plan = axs.protocols.recruitment_sweep_plan(
         pool,
         update=update,
         values=np.asarray([0.0, 1.0]) * axs.nA,
@@ -987,9 +1041,9 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
         batch_amplitudes=True,
     )
 
-    assert len(calls) == 1
-    assert calls[0] == pool
-    np.testing.assert_array_equal(curve.activated, [[False], [True]])
+    assert plan.source.population.source == pool
+    assert plan.source.population.source[0].resolved_formulation == "double-cable"
+    assert [len(values) for _, values in plan.value_batches()] == [2]
 
 
 def test_activation_observer_pool_result_uses_cohort_vector_path():

@@ -219,18 +219,6 @@ class Model(metaclass=_MembraneModelClass):
             values[provided_aliases.get(field_info.name, field_info.name)] = value
         return values
 
-    def __post_init__(self) -> None:
-        values = self._raw_parameter_values()
-        if not values:
-            return
-        from axonfleet.membranes.compiler import normalize_source_file_parameters
-
-        normalize_source_file_parameters(
-            self.__class__.source_path(),
-            values,
-            model_class_name=self.__class__.source_class(),
-        )
-
     def _membrane_descriptor(self) -> "MembraneModel":
         try:
             hash(self)
@@ -395,6 +383,8 @@ def ensure_membrane_model(value: Any) -> MembraneModel:
 
     if isinstance(value, MembraneModel):
         return value
+    if isinstance(value, Composite):
+        return value._membrane_descriptor()
     if isinstance(value, type) and issubclass(value, Model):
         return value()._membrane_descriptor()
     if isinstance(value, Model):
@@ -402,6 +392,20 @@ def ensure_membrane_model(value: Any) -> MembraneModel:
     raise TypeError(
         "Axon sections require an axonfleet.membranes.Model instance or "
         "internal MembraneModel description; "
+        f"got {value.__class__.__module__}.{value.__class__.__qualname__}."
+    )
+
+
+def require_membrane_description(value: Any) -> Any:
+    """Validate a membrane description without compiling or normalizing it."""
+
+    if isinstance(value, (Model, MembraneModel, Composite)):
+        return value
+    if isinstance(value, type) and issubclass(value, Model):
+        return value
+    raise TypeError(
+        "Axon sections require an axonfleet.membranes.Model instance, Model "
+        "class, Composite, or internal MembraneModel description; "
         f"got {value.__class__.__module__}.{value.__class__.__qualname__}."
     )
 
@@ -414,18 +418,29 @@ def _validate_component_label(label: str) -> None:
         )
 
 
-def _component_label_from_kind(component: MembraneModel) -> str:
-    label = str(component.kind)
+def _description_kind(component: Any) -> str:
+    require_membrane_description(component)
+    if isinstance(component, MembraneModel):
+        return str(component.kind)
+    if isinstance(component, Composite):
+        return "composite"
+    if isinstance(component, type):
+        return component.kind_name()
+    return component.kind
+
+
+def _component_label_from_kind(component: Any) -> str:
+    label = _description_kind(component)
     _validate_component_label(label)
     return label
 
 
 def _resolve_composite_components(
     components: Mapping[str, Any] | Sequence[Any],
-) -> tuple[tuple[MembraneModel, ...], tuple[str, ...]]:
+) -> tuple[tuple[Any, ...], tuple[str, ...]]:
     if isinstance(components, MappingABC):
         labels: list[str] = []
-        models: list[MembraneModel] = []
+        models: list[Any] = []
         for label, component in components.items():
             normalized_label = str(label)
             _validate_component_label(normalized_label)
@@ -434,12 +449,12 @@ def _resolve_composite_components(
                     f"Composite component label {normalized_label!r} is duplicated."
                 )
             labels.append(normalized_label)
-            models.append(ensure_membrane_model(component))
+            models.append(require_membrane_description(component))
         if not models:
             raise ValueError("Composite requires at least one membrane component.")
         return tuple(models), tuple(labels)
 
-    models = tuple(ensure_membrane_model(component) for component in components)
+    models = tuple(require_membrane_description(component) for component in components)
     if not models:
         raise ValueError("Composite requires at least one membrane component.")
     labels = tuple(_component_label_from_kind(component) for component in models)
@@ -455,15 +470,52 @@ def _resolve_composite_components(
     return models, labels
 
 
-def Composite(components: Mapping[str, Any] | Sequence[Any]) -> MembraneModel:
-    """Compose several membrane descriptions on the same section."""
+@dataclass(frozen=True, init=False)
+class Composite:
+    """Lazy composition of membrane descriptions on the same section."""
 
-    models, labels = _resolve_composite_components(components)
-    return MembraneModel(
-        "composite",
-        components=models,
-        component_labels=labels,
-    )
+    components: tuple[Any, ...]
+    component_labels: tuple[str, ...]
+
+    @property
+    def dtype(self) -> np.dtype:
+        """Numerical dtype selected when this composition is materialized."""
+
+        return np.dtype(np.float32)
+
+    def __init__(self, components: Mapping[str, Any] | Sequence[Any]) -> None:
+        models, labels = _resolve_composite_components(components)
+        object.__setattr__(self, "components", models)
+        object.__setattr__(self, "component_labels", labels)
+
+    def _membrane_descriptor(self) -> MembraneModel:
+        try:
+            hash(self)
+        except TypeError:
+            return self._build_membrane_descriptor()
+        return _cached_composite_descriptor(self)
+
+    def _build_membrane_descriptor(self) -> MembraneModel:
+        return MembraneModel(
+            "composite",
+            components=tuple(ensure_membrane_model(item) for item in self.components),
+            component_labels=self.component_labels,
+        )
+
+    def inspect_generated_code(self, **kwargs: Any) -> Any:
+        """Explicitly materialize and inspect generated compiler artifacts."""
+
+        return self._membrane_descriptor().inspect_generated_code(**kwargs)
+
+    def explain(self) -> Any:
+        """Explicitly materialize and explain this membrane composition."""
+
+        return self._membrane_descriptor().explain()
+
+
+@lru_cache(maxsize=256)
+def _cached_composite_descriptor(model: Composite) -> MembraneModel:
+    return model._build_membrane_descriptor()
 
 
 __all__ = [
@@ -476,6 +528,7 @@ __all__ = [
     "initials",
     "mechanism",
     "rates",
+    "require_membrane_description",
     "section",
     "state",
     "step",

@@ -655,9 +655,18 @@ def test_axon_simulation_results_use_canonical_result_model_not_lists():
     assert hints["return"] is axs.results.AxonSimulationResult
 
 
-def test_axon_simulation_uses_one_population_lifecycle():
-    text = (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
-    assert "run_pool(" in text
+def test_axon_simulation_delegates_one_plan_to_runner():
+    simulation_text = (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
+    runner_text = (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
+
+    assert "self._execution_runner().run(self.plan())" in simulation_text
+    assert "self._population_plan = PopulationPlan(axons)" in simulation_text
+    assert "AxonPopulation(axons)" not in simulation_text
+    assert "def _population(" in runner_text
+    assert "run_pool(" not in simulation_text
+    assert "_execute_dispatch_plan(" in runner_text
+    assert "StudyPlan.from_plans" in runner_text
+    assert "tuple(self.run(plan) for plan in plans)" not in runner_text
 
 
 def test_examples_and_public_docs_teach_one_result_path():
@@ -805,7 +814,7 @@ def test_public_view_modules_use_shared_plotting_helpers():
 
 def test_dispatch_progress_uses_structured_dispatch_and_backend_events():
     progress_text = (SRC_ROOT / "dispatcher" / "progress.py").read_text(encoding="utf-8")
-    execution_text = (SRC_ROOT / "dispatcher" / "execution.py").read_text(encoding="utf-8")
+    execution_text = (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
     jax_runner_text = (SRC_ROOT / "runtime" / "jax" / "group_runner.py").read_text(
         encoding="utf-8"
     )
@@ -905,6 +914,8 @@ def test_protocol_observer_path_uses_shared_vm_raster_decoders():
     }
 
     assert "activation_values_from_vm_raster" in text
+    assert ".run()" not in text
+    assert "def _evaluate_activation_observer" not in text
     offenders = sorted(term for term in forbidden_terms if term in text)
     assert offenders == []
 
@@ -1338,8 +1349,8 @@ def test_solver_facade_exposes_only_stable_solver_surface():
     assert "axonfleet.runtime.jax.preparation.base" not in text
 
 
-def test_dispatcher_execution_does_not_import_concrete_jax_backend():
-    path = SRC_ROOT / "dispatcher" / "execution.py"
+def test_runner_does_not_import_concrete_jax_backend():
+    path = SRC_ROOT / "runner.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
         "axonfleet.runtime.jax",
@@ -1410,7 +1421,7 @@ def test_dispatch_method_label_has_one_dispatcher_owner():
     assert "def dispatch_method_label" in plan_text
 
     consumers = (
-        SRC_ROOT / "dispatcher" / "execution.py",
+        SRC_ROOT / "runner.py",
         SRC_ROOT / "dispatcher" / "progress.py",
         SRC_ROOT / "inspection" / "views.py",
         SRC_ROOT / "runtime" / "jax" / "group_runner.py",
@@ -1548,7 +1559,7 @@ def test_group_runner_routes_runtime_caches_through_cache_module():
     assert offenders == []
 
 
-def test_prepared_cohort_caches_are_runtime_neutral_not_jax_runtime_state():
+def test_prepared_cohort_cache_is_runtime_neutral_and_runner_owned():
     group_preparation = SRC_ROOT / "runtime" / "group_preparation.py"
     runtime_caches = SRC_ROOT / "runtime" / "jax" / "preparation" / "caches.py"
     runtime_preparation = SRC_ROOT / "runtime" / "jax" / "preparation" / "runtime.py"
@@ -1556,13 +1567,20 @@ def test_prepared_cohort_caches_are_runtime_neutral_not_jax_runtime_state():
     group_text = group_preparation.read_text(encoding="utf-8")
     caches_text = runtime_caches.read_text(encoding="utf-8")
     preparation_text = runtime_preparation.read_text(encoding="utf-8")
+    runner_text = (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
 
     assert "PreparedCohort" in group_text
-    assert "def prepared_cohort_for_group" in group_text
-    assert "def prepared_cohort_for_current_group" in group_text
+    assert "class PreparedCohortCache" in group_text
+    assert "def for_group" in group_text
+    assert "def for_current_group" in group_text
     assert "def representative_item" in group_text
     assert "def group_runtime_signature" in group_text
     assert "def runtime_context_cache_key" in group_text
+    assert "self._prepared_cohorts = PreparedCohortCache()" in runner_text
+    assert "preparation_cache=self._prepared_cohorts" in runner_text
+    assert "self._prepared_cohorts.clear()" in runner_text
+    assert "_PREPARED_COHORT_CACHE:" not in group_text
+    assert "_PREPARED_COHORT_IDENTITY_CACHE:" not in group_text
 
     forbidden_jax_cache_terms = {
         "PreparedCohort",
@@ -1586,6 +1604,29 @@ def test_prepared_cohort_caches_are_runtime_neutral_not_jax_runtime_state():
         sorted(term for term in forbidden_jax_preparation_terms if term in preparation_text)
         == []
     )
+
+
+def test_membrane_descriptions_remain_unmaterialized_until_runtime_preparation():
+    model_text = (SRC_ROOT / "membranes" / "model.py").read_text(encoding="utf-8")
+    section_text = (SRC_ROOT / "axons" / "section.py").read_text(encoding="utf-8")
+    section_layout_text = (
+        SRC_ROOT / "membranes" / "section_layout.py"
+    ).read_text(encoding="utf-8")
+    flattened_text = (SRC_ROOT / "axons" / "flattened.py").read_text(encoding="utf-8")
+    solver_axon_text = (SRC_ROOT / "runtime" / "solver_axon.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def __post_init__(self)" not in model_text.split(
+        "class Model", 1
+    )[1].split("class MembraneModel", 1)[0]
+    assert "require_membrane_description(membrane)" in section_text
+    assert "ensure_membrane_model(membrane)" not in section_text
+    assert "require_membrane_description(model)" in section_layout_text
+    assert "ensure_membrane_model" not in section_layout_text
+    assert "membranes: tuple[object, ...]" in flattened_text
+    assert "ensure_membrane_model" not in flattened_text
+    assert "_resolve_membrane_descriptions(flat.membranes)" in solver_axon_text
 
 
 def test_group_runner_routes_runtime_preparation_through_preparation_module():
@@ -1614,10 +1655,9 @@ def test_group_runner_routes_runtime_preparation_through_preparation_module():
 
     assert "axonfleet.runtime.jax.preparation.runtime" in text
     assert "axonfleet.runtime.jax.preparation.stacking" in text
-    assert "axonfleet.runtime.group_preparation" in text
     for required in (
         "prepare_batch_runtime",
-        "prepared_cohort_for_current_group",
+        "preparation_cache.for_current_group",
         "group_cm_uF_cm2",
     ):
         assert required in text
@@ -1685,12 +1725,16 @@ def test_preparation_stimulation_rows_remains_host_side_only():
 
 
 def test_public_simulation_orchestrator_uses_backend_execution_boundary():
-    path = SRC_ROOT / "simulation.py"
-    text = path.read_text(encoding="utf-8")
+    simulation_path = SRC_ROOT / "simulation.py"
+    runner_path = SRC_ROOT / "runner.py"
+    simulation_text = simulation_path.read_text(encoding="utf-8")
+    runner_text = runner_path.read_text(encoding="utf-8")
 
-    assert _jax_import_locations(path) == []
-    assert "axonfleet.runtime.jax" not in text
-    assert "axonfleet.runtime.execution" in text
+    assert _jax_import_locations(simulation_path) == []
+    assert _jax_import_locations(runner_path) == []
+    assert "axonfleet.runtime.jax" not in simulation_text
+    assert "axonfleet.runtime.jax" not in runner_text
+    assert "axonfleet.runtime.execution" in runner_text
 
 
 def test_benchmarking_public_module_is_an_interface_not_a_runtime_engine():
@@ -2265,7 +2309,7 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "### Double-Cable Batch Route",
         "### Threshold Observers, Dense/Factorized Vext, And Results",
         "build_dispatch_plan",
-        "_run_batch_group",
+        "Runner._execute_dispatch_plan",
         "enqueue_jax_batch_group",
         "finalize_jax_batch_group",
         "build_sparse_intracellular_current_density_batch",
@@ -2301,4 +2345,20 @@ def test_numeric_execution_axis_is_protocol_independent():
     assert "axonfleet.protocols" not in axis_text
     assert "recruitment" not in axis_text.lower()
     assert "expand_dispatch_plan_for_numeric_axis" in plan_text
-    assert "_run_numeric_axis" in simulation_text
+    assert "_run_numeric_axis" not in simulation_text
+    assert "with_numeric_axis" in (SRC_ROOT / "plans.py").read_text(encoding="utf-8")
+    assert "NumericAxisUpdate" in (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
+
+
+def test_threshold_protocol_builds_a_plan_instead_of_owning_execution():
+    threshold_text = (SRC_ROOT / "protocols" / "threshold.py").read_text(
+        encoding="utf-8"
+    )
+    runner_text = (SRC_ROOT / "runner.py").read_text(encoding="utf-8")
+
+    assert "find_threshold_plan" in threshold_text
+    assert "ThresholdPlan(" in threshold_text
+    assert "_evaluate_threshold_updated_pool" not in threshold_text
+    assert "for iteration in range" not in threshold_text
+    assert "_run_threshold" in runner_text
+    assert "_resolve_threshold_bounds" in runner_text

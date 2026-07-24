@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from axonfleet.axons.section import PeriaxonalLayer
-from axonfleet.membranes.model import MembraneModel, ensure_membrane_model
 
 if TYPE_CHECKING:
     from axonfleet.axons.layout import Layout
@@ -50,7 +49,7 @@ class FlattenedLayout:
     diam_um: np.ndarray
     Ra_ohm_cm: np.ndarray
     Cm_uF_cm2: np.ndarray
-    membrane_models: tuple[MembraneModel, ...]
+    membranes: tuple[object, ...]
     section_names: tuple[str, ...]
     section_indices: np.ndarray
     section_tags: tuple[tuple[str, ...], ...]
@@ -65,7 +64,7 @@ class FlattenedLayout:
         Ra_ohm_cm = np.asarray(self.Ra_ohm_cm, dtype=np.float32)
         Cm_uF_cm2 = np.asarray(self.Cm_uF_cm2, dtype=np.float32)
         section_indices = np.asarray(self.section_indices, dtype=np.int32)
-        membrane_models = tuple(self.membrane_models)
+        membranes = tuple(self.membranes)
         section_names = tuple(self.section_names)
         section_tags = tuple(tuple(tags) for tags in self.section_tags)
         periaxonal_layers = tuple(self.periaxonal_layers)
@@ -80,8 +79,8 @@ class FlattenedLayout:
             raise ValueError("FlattenedLayout arrays must all have the same length.")
         if edges_um.ndim != 1 or edges_um.shape != (n + 1,):
             raise ValueError("edges_um must have one more entry than compartment arrays.")
-        if len(membrane_models) != n:
-            raise ValueError("membrane_models must have one entry per compartment.")
+        if len(membranes) != n:
+            raise ValueError("membranes must have one entry per compartment.")
         if len(section_names) != n:
             raise ValueError("section_names must have one entry per compartment.")
         if len(section_tags) != n:
@@ -124,7 +123,7 @@ class FlattenedLayout:
         object.__setattr__(self, "Ra_ohm_cm", Ra_ohm_cm)
         object.__setattr__(self, "Cm_uF_cm2", Cm_uF_cm2)
         object.__setattr__(self, "section_indices", section_indices)
-        object.__setattr__(self, "membrane_models", membrane_models)
+        object.__setattr__(self, "membranes", membranes)
         object.__setattr__(self, "section_names", section_names)
         object.__setattr__(self, "section_tags", section_tags)
         object.__setattr__(self, "periaxonal_layers", periaxonal_layers)
@@ -185,7 +184,7 @@ def _flatten_x_centers(layout: "Layout") -> FlattenedLayout:
         diam_um=np.full((count,), section.diameter_um, dtype=np.float32),
         Ra_ohm_cm=np.full((count,), section.Ra_ohm_cm, dtype=np.float32),
         Cm_uF_cm2=np.full((count,), section.Cm_uF_cm2, dtype=np.float32),
-        membrane_models=tuple(ensure_membrane_model(section.membrane) for _ in range(count)),
+        membranes=tuple(section.membrane for _ in range(count)),
         section_names=tuple(section.name for _ in range(count)),
         section_indices=np.zeros((count,), dtype=np.int32),
         section_tags=tuple(section.tags for _ in range(count)),
@@ -201,7 +200,7 @@ def _flatten_elements(layout: "Layout") -> FlattenedLayout:
     diam: list[float] = []
     Ra: list[float] = []
     Cm: list[float] = []
-    membranes: list[MembraneModel] = []
+    membranes: list[object] = []
     names: list[str] = []
     section_indices: list[int] = []
     tags: list[tuple[str, ...]] = []
@@ -219,10 +218,7 @@ def _flatten_elements(layout: "Layout") -> FlattenedLayout:
         diam.extend(float(section.diameter_um) for _ in range(element.compartments))
         Ra.extend(float(section.Ra_ohm_cm) for _ in range(element.compartments))
         Cm.extend(float(section.Cm_uF_cm2) for _ in range(element.compartments))
-        membranes.extend(
-            ensure_membrane_model(section.membrane)
-            for _ in range(element.compartments)
-        )
+        membranes.extend(section.membrane for _ in range(element.compartments))
         names.extend(section.name for _ in range(element.compartments))
         section_indices.extend(section_index for _ in range(element.compartments))
         tags.extend(section.tags for _ in range(element.compartments))
@@ -240,7 +236,7 @@ def _flatten_elements(layout: "Layout") -> FlattenedLayout:
         diam_um=np.asarray(diam, dtype=np.float32),
         Ra_ohm_cm=np.asarray(Ra, dtype=np.float32),
         Cm_uF_cm2=np.asarray(Cm, dtype=np.float32),
-        membrane_models=tuple(membranes),
+        membranes=tuple(membranes),
         section_names=tuple(names),
         section_indices=np.asarray(section_indices, dtype=np.int32),
         section_tags=tuple(tags),

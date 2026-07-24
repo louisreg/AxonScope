@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Sequence
 
@@ -9,28 +10,32 @@ import numpy as np
 
 from axonfleet.analysis import Activation
 from axonfleet.protocols.observer_path import (
+    _activation_observer_sweep_plan,
     _can_use_activation_observer,
-    _evaluate_activation_observer_pool,
-    _execute_activation_observer_sweep_plan,
 )
-from axonfleet.protocols.progress import (
-    _OneShotProgress,
-    _SweepProgress,
-    _activation_progress_summary,
-)
+from axonfleet.plans import SweepPlan
+from axonfleet.protocols.progress import _activation_progress_summary
 from axonfleet.protocols.results import PoolSweepResult, RecruitmentCurve
 from axonfleet.protocols.sweep import (
-    _apply_pool_update,
-    _plan_numeric_pool_sweep,
-    pool_sweep,
+    _normalize_value_batch_size,
+    pool_sweep_plan,
 )
 from axonfleet.protocols.types import NumericAxisUpdate, PoolUpdate, SimulationCandidate
 from axonfleet.protocols.values import _normalize_sweep_values, _require_current_array_uA
 from axonfleet.recording import Recording
 from axonfleet.runtime import ExecutionPolicy
 from axonfleet.runtime.benchmarking import benchmark_span
+from axonfleet.runner import Runner
 from axonfleet.solvers import BatchOptions
 from axonfleet.utils import units
+
+
+@dataclass(frozen=True)
+class _ActivationRowDecoder:
+    criterion: Activation
+
+    def __call__(self, result: Any) -> bool:
+        return bool(self.criterion.detect(result).activated)
 
 
 def _recruitment_stage(function):
@@ -78,40 +83,97 @@ def recruitment_sweep(
     amplitudes_uA = _require_current_array_uA(values, name="values")
     if amplitudes_uA.ndim != 1:
         raise ValueError("values must be a 1D current array.")
-    if _can_use_activation_observer(recording):
-        sweep = _activation_pool_sweep(
-            pool,
+    base_pool = tuple(pool)
+    if not base_pool:
+        return RecruitmentCurve(
+            amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
+            activated=np.zeros((len(amplitudes_uA), 0), dtype=bool),
+        )
+    plan = recruitment_sweep_plan(
+        base_pool,
+        update=update,
+        values=units.Q_(amplitudes_uA, "microampere"),
+        duration=duration,
+        dt=dt,
+        criterion=criterion,
+        recording=recording,
+        batch_options=batch_options,
+        execution_policy=execution_policy,
+        progress=progress,
+        solver_progress=solver_progress,
+        batch_amplitudes=batch_amplitudes,
+        amplitude_batch_size=amplitude_batch_size,
+    )
+    sweep = Runner().run(plan)
+    return RecruitmentCurve(
+        amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
+        activated=np.asarray(sweep.observations, dtype=bool),
+    )
+
+
+def recruitment_sweep_plan(
+    pool: Sequence[SimulationCandidate],
+    *,
+    update: PoolUpdate,
+    values: Any,
+    duration: Any,
+    dt: Any,
+    criterion: Activation,
+    recording: Recording | None = None,
+    batch_options: BatchOptions | None = None,
+    execution_policy: ExecutionPolicy | None = None,
+    progress: bool | str = False,
+    solver_progress: bool | str = False,
+    batch_amplitudes: bool = False,
+    amplitude_batch_size: int | None = None,
+) -> SweepPlan:
+    """Build a lazy recruitment sweep plan without running its population."""
+
+    base_pool = tuple(pool)
+    if not base_pool:
+        raise ValueError("recruitment_sweep_plan requires at least one source row.")
+    amplitudes_uA = _require_current_array_uA(values, name="values")
+    if amplitudes_uA.ndim != 1:
+        raise ValueError("values must be a 1D current array.")
+    value_tuple = _normalize_sweep_values(units.Q_(amplitudes_uA, "microampere"))
+    observer_path = _can_use_activation_observer(recording)
+    if batch_amplitudes and not isinstance(update, NumericAxisUpdate):
+        raise ValueError(
+            "batch_amplitudes=True requires a typed NumericAxisUpdate so the "
+            "runner can preserve one stable population and execution contract."
+        )
+    if amplitude_batch_size is not None and not batch_amplitudes:
+        raise ValueError("amplitude_batch_size requires batch_amplitudes=True.")
+    if not observer_path and (batch_amplitudes or amplitude_batch_size is not None):
+        raise ValueError(
+            "amplitude batching requires an observer-only recruitment path; "
+            "use recording=None or Recording.none()."
+        )
+
+    value_batch_size = (
+        _normalize_value_batch_size(amplitude_batch_size, len(value_tuple))
+        if batch_amplitudes
+        else 1
+    )
+    if observer_path:
+        return _activation_observer_sweep_plan(
+            base_pool,
             update=update,
-            values=units.Q_(amplitudes_uA, "microampere"),
+            values=value_tuple,
+            value_batch_size=value_batch_size,
+            criterion=criterion,
             duration=duration,
             dt=dt,
-            criterion=criterion,
             progress=progress,
             batch_options=batch_options,
             execution_policy=execution_policy,
             solver_progress=solver_progress,
-            batch_amplitudes=batch_amplitudes,
-            amplitude_batch_size=amplitude_batch_size,
         )
-        return RecruitmentCurve(
-            amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
-            activated=np.asarray(sweep.observations, dtype=bool),
-        )
-    if batch_amplitudes:
-        raise ValueError(
-            "batch_amplitudes=True requires an observer-only recruitment path; "
-            "use recording=None or Recording.none() with a compatible activation criterion."
-        )
-    if amplitude_batch_size is not None:
-        raise ValueError(
-            "amplitude_batch_size requires an observer-only recruitment path; "
-            "use recording=None or Recording.none() with a compatible activation criterion."
-        )
-    sweep = pool_sweep(
-        pool,
+    return pool_sweep_plan(
+        base_pool,
         update=update,
-        values=units.Q_(amplitudes_uA, "microampere"),
-        observe=lambda result: criterion.detect(result).activated,
+        values=value_tuple,
+        observe=_ActivationRowDecoder(criterion),
         duration=duration,
         dt=dt,
         recording=recording,
@@ -120,10 +182,6 @@ def recruitment_sweep(
         progress=progress,
         progress_summary=_activation_progress_summary,
         solver_progress=solver_progress,
-    )
-    return RecruitmentCurve(
-        amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
-        activated=np.asarray(sweep.observations, dtype=bool),
     )
 
 
@@ -146,93 +204,31 @@ def _activation_pool_sweep(
 
     base_pool = tuple(pool)
     value_tuple = _normalize_sweep_values(values)
-    if len(base_pool) == 0:
+    if not base_pool:
         return PoolSweepResult(
             values=value_tuple,
             observations=np.zeros((len(value_tuple), 0), dtype=bool),
         )
-    if batch_amplitudes and not isinstance(update, NumericAxisUpdate):
-        raise ValueError(
-            "batch_amplitudes=True requires a typed NumericAxisUpdate so the "
-            "runner can preserve one stable population and execution contract."
-        )
-    if amplitude_batch_size is not None:
-        if not batch_amplitudes:
-            raise ValueError("amplitude_batch_size requires batch_amplitudes=True.")
-
-    if isinstance(update, NumericAxisUpdate):
-        plan = _plan_numeric_pool_sweep(
+    return Runner().run(
+        recruitment_sweep_plan(
             base_pool,
             update=update,
             values=value_tuple,
-            value_batch_size=amplitude_batch_size if batch_amplitudes else 1,
-        )
-        return _execute_activation_observer_sweep_plan(
-            plan,
-            criterion=criterion,
             duration=duration,
             dt=dt,
-            progress=progress,
+            criterion=criterion,
+            recording=Recording.none(),
             batch_options=batch_options,
             execution_policy=execution_policy,
+            progress=progress,
             solver_progress=solver_progress,
+            batch_amplitudes=batch_amplitudes,
+            amplitude_batch_size=amplitude_batch_size,
         )
-
-    progress_display = _SweepProgress(progress)
-    solver_progress_gate = _OneShotProgress(solver_progress)
-    observation_rows: list[np.ndarray] = []
-    try:
-        for index, value in enumerate(value_tuple):
-            progress_display.begin(
-                label="Pool sweep",
-                current_index=index,
-                values=value_tuple,
-                completed_rows=observation_rows,
-                progress_summary=_activation_progress_summary,
-            )
-            with benchmark_span(
-                "protocol.sweep.value",
-                index=index,
-                value=str(value),
-                pool_size=len(base_pool),
-            ):
-                updated_pool = tuple(
-                    _apply_pool_update(row, update, value) for row in base_pool
-                )
-                observations = _evaluate_activation_observer_pool(
-                    updated_pool,
-                    criterion=criterion,
-                    duration=duration,
-                    dt=dt,
-                    progress=solver_progress_gate.consume(),
-                    batch_options=batch_options,
-                    execution_policy=execution_policy,
-                )
-            observation_rows.append(observations)
-            progress_display.update(
-                label="Pool sweep",
-                current_index=index,
-                values=value_tuple,
-                completed_rows=observation_rows,
-                progress_summary=_activation_progress_summary,
-            )
-    finally:
-        progress_display.close()
-
-    if not observation_rows:
-        return PoolSweepResult(
-            values=value_tuple,
-            observations=np.zeros((0, len(base_pool)), dtype=bool),
-        )
-    width = observation_rows[0].shape[0]
-    if any(row.shape[0] != width for row in observation_rows):
-        raise ValueError("pool/update must keep the same number of rows each time.")
-    return PoolSweepResult(
-        values=value_tuple,
-        observations=np.stack(observation_rows, axis=0),
     )
 
 
 __all__ = [
     "recruitment_sweep",
+    "recruitment_sweep_plan",
 ]

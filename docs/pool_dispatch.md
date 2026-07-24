@@ -29,12 +29,61 @@ the ordered cohort that is sent to dispatch.
 
 ```text
 AxonSimulation or AxonPopulation
+  -> immutable PopulationPlan / SimulationPlan / SweepPlan
+  -> Runner
   -> internal dispatch items
   -> dispatch groups
   -> runtime-batch builders when a batch path is available
   -> scalar/batch solver path
   -> AxonSimulationResult with dense cohorts and per-axon views
 ```
+
+`AxonSimulation.run()` builds a `SimulationPlan` and delegates it to a
+`Runner`. Its ordered inputs remain a `PopulationPlan` until the runner
+materializes and caches the canonical `AxonPopulation`; explicit `estimate()`,
+`inspect()`, or access to `AxonSimulation.population` intentionally cross the
+same boundary. Generic pool sweeps and recruitment sweeps follow the same route:
+`pool_sweep_plan(...)` and `recruitment_sweep_plan(...)` return immutable
+`SweepPlan` descriptions, while `find_threshold_plan(...)` returns a
+`ThresholdPlan`. Their convenience functions execute those plans immediately.
+Numeric-axis preparation, value chunk scheduling, callable-bound resolution,
+and threshold bisection happen only inside the runner.
+
+Build a plan explicitly when several operations should intentionally share one
+runner's preparation cache or when work must be inspected before execution:
+
+```python
+plan = axs.protocols.recruitment_sweep_plan(
+    population,
+    update=update,
+    values=amplitudes,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    criterion=axs.analysis.Activation(),
+)
+curve_rows = axs.Runner().run(plan)
+```
+
+Each runner owns its materialized population, dispatch plans, and bounded
+`PreparedCohort` cache. `Runner.clear()` drops all three. Concrete runtime
+caches for immutable compiled membrane programs, JAX executables, and Triton
+artifacts remain backend/process-owned so a new runner does not force needless
+recompilation.
+
+Membrane descriptions follow the same lazy boundary. `Model`, `Composite`,
+`SectionLayout`, `Section`, and flattened geometry retain ordinary Python
+descriptions; reading positions, diameters, or plotting a layout does not
+compile membrane source. Runner preparation resolves each distinct description
+once while building solver axons. Parameter and unit errors that require the
+membrane compiler therefore surface from `run()`, `estimate()`, `inspect()`, or
+explicit membrane introspection rather than from descriptive constructors.
+
+For several plans, `StudyPlan` adds stable named dependencies without adding a
+protocol-specific scheduler. `Runner` executes its topological order, reports
+each task through `runner.study.task` benchmark spans, and fails before running
+dependent or later work. Completed values remain available on
+`StudyExecutionError.completed`. `CancellationToken` is checked at safe runner
+boundaries; in-flight backend kernels complete normally.
 
 `AxonSimulation.run()` returns an `AxonSimulationResult`. Indexing or iterating
 over it returns one `AxonResultView` per input item, in the same order:
@@ -119,38 +168,13 @@ footprints. By the time dispatch/preparation starts, each row has local sampled
 extracellular stimulation. The dispatcher/runtime never requires a world
 position on the axon instance.
 
-## Advanced Dispatch
+## Execution Controls
 
-`run_pool` is the lower-level dispatch entry point. It also accepts an
-`AxonPopulation` or sequence of `Axon`/`AxonInstance` objects, but returns
-private dispatch results instead of public result containers:
-
-```python
-from axonfleet.dispatcher import run_pool
-
-dispatch_results = run_pool(
-    population,
-    tsim_ms=5.0,
-    dt_ms=0.01,
-)
-```
-
-Use this path for debugging dispatcher metadata. Tutorials should prefer
-`AxonSimulation`.
-
-Solver-level knobs are passed as solver options. Batch memory/recording knobs
-are passed separately as batch options:
-
-```python
-import axonfleet as axs
-
-dispatch_results = run_pool(
-    [sim_a, sim_b],
-    tsim_ms=5.0,
-    dt_ms=0.01,
-    batch_options=axs.BatchOptions(time_chunk_steps=50),
-)
-```
+There is no second raw pool execution API. `Runner` owns group scheduling and
+canonical result assembly; user workflows enter it through
+`AxonSimulation.run()` or an explicit runnable plan. Solver-level knobs are
+passed as solver options, while batch memory and recording knobs are passed as
+`BatchOptions` to `AxonSimulation`.
 
 Observer-only pool runs (`Recording.none()` plus compatible solver-side
 threshold observers, or `BatchOptions.none()`) use a stable default chunk size of
@@ -271,8 +295,9 @@ integration, and numerical state.
 Current files:
 
 - `simulation.py`: public `AxonSimulation` orchestration;
+- `runner.py`: plan execution, dispatch-plan reuse, group scheduling, and
+  canonical result assembly;
 - `dispatcher/plan.py`: normalization, compatibility signatures, and groups;
-- `dispatcher/execution.py`: batch scheduling and execution;
 - `inspection/`: public simulation and dispatch-plan inspection records and
   views;
 - `preparation/`: host-side axon, membrane, cohort, and stimulation row

@@ -32,7 +32,7 @@ from axonfleet.utils.validation import (
     require_non_negative,
     require_positive,
 )
-from axonfleet.membranes.model import MembraneModel, Model, ensure_membrane_model
+from axonfleet.membranes.model import require_membrane_description
 
 
 def _default_Ra() -> units.axial_resistivity_t:
@@ -145,7 +145,7 @@ class Section:
     """
 
     name: str
-    membrane: MembraneModel | Model
+    membrane: object
     diameter_um: float
     Ra_ohm_cm: float = field(init=False)
     Cm_uF_cm2: float = field(init=False)
@@ -200,9 +200,7 @@ class Section:
         )
         if periaxonal is not None and not isinstance(periaxonal, PeriaxonalLayer):
             raise TypeError("periaxonal must be a PeriaxonalLayer or None.")
-        if isinstance(membrane, type) and issubclass(membrane, Model):
-            membrane = membrane()
-        ensure_membrane_model(membrane)
+        require_membrane_description(membrane)
         object.__setattr__(self, "name", normalize_non_empty_string(name, name="Section name"))
         object.__setattr__(self, "membrane", membrane)
         object.__setattr__(self, "diameter_um", require_positive(diameter_value, name="diameter"))

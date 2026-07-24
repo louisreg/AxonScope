@@ -104,9 +104,12 @@ The one-row route is:
 
 ```text
 AxonSimulation.run()
-  -> run_pool(...)
-  -> build_dispatch_plan(...)
-  -> _run_batch_group(...)
+  -> PopulationPlan (descriptive rows only)
+  -> SimulationPlan
+  -> Runner.run(...)
+  -> runner-owned AxonPopulation materialization/reuse
+  -> runner-owned build_dispatch_plan(...)
+  -> Runner._execute_dispatch_plan(...)
   -> runtime.execution.enqueue_batch_group(...)
   -> runtime/jax/group_runner.enqueue_jax_batch_group(...)
   -> runtime.execution.finalize_batch_group(...)
@@ -122,14 +125,21 @@ larger groups.
 ### Pool And Planning Route
 
 Pool execution starts from `AxonSimulation.run(...)` for both one-row and
-many-row populations. Public orchestration stays in `simulation.py`, while
-dispatch grouping stays in `dispatcher/execution.py`:
+many-row populations. `simulation.py` creates backend-neutral population and
+simulation plans without constructing concrete population rows; `runner.py`
+owns population and dispatch materialization, group scheduling, execution, and
+public result assembly:
 
 ```text
 AxonSimulation.run()
-  -> run_pool(...)
-  -> build_dispatch_plan(...)
-  -> _run_batch_group(...) for supported single/double-cable groups, including B=1
+  -> PopulationPlan
+  -> SimulationPlan
+  -> Runner.run(...)
+  -> runner-owned AxonPopulation materialization/reuse
+  -> runner-owned build_dispatch_plan(...)
+  -> Runner._execute_dispatch_plan(...)
+  -> runtime.execution.run_batch_group(...) for supported single/double-cable
+     groups, including B=1
 ```
 
 Unsupported group modes or unsupported recording requests fail explicitly

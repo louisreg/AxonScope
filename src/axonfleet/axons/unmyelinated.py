@@ -117,7 +117,7 @@ def _cached_builtin_model_from_items(
 
 def _single_section_model(
     *,
-    membrane: Model | MembraneModel,
+    membrane: object,
     length: length_t | None,
     diameter: length_t,
     compartments: int | None,
@@ -125,25 +125,30 @@ def _single_section_model(
     Ra: axial_resistivity_t | None,
     Cm: capacitance_density_t | None,
 ) -> Layout:
-    if x is None and isinstance(membrane, MembraneModel):
-        assert length is not None
-        assert compartments is not None
-        return _cached_single_uniform_layout(
-            membrane,
-            units.require_length_um(length, name="length"),
-            round_axon_diameter_um(
-                units.require_length_um(diameter, name="diameter")
-            ),
-            normalize_positive_int(compartments, name="compartments"),
-            units.require_axial_resistivity_ohm_cm(
-                _DEFAULT_Ra if Ra is None else Ra,
-                name="Ra",
-            ),
-            units.require_capacitance_density_uF_per_cm2(
-                _DEFAULT_Cm if Cm is None else Cm,
-                name="Cm",
-            ),
-        )
+    if x is None:
+        try:
+            hash(membrane)
+        except TypeError:
+            pass
+        else:
+            assert length is not None
+            assert compartments is not None
+            return _cached_single_uniform_layout(
+                membrane,
+                units.require_length_um(length, name="length"),
+                round_axon_diameter_um(
+                    units.require_length_um(diameter, name="diameter")
+                ),
+                normalize_positive_int(compartments, name="compartments"),
+                units.require_axial_resistivity_ohm_cm(
+                    _DEFAULT_Ra if Ra is None else Ra,
+                    name="Ra",
+                ),
+                units.require_capacitance_density_uF_per_cm2(
+                    _DEFAULT_Cm if Cm is None else Cm,
+                    name="Cm",
+                ),
+            )
 
     section = Section(
         "axon",
@@ -166,7 +171,7 @@ def _single_section_model(
 
 @lru_cache(maxsize=512)
 def _cached_single_uniform_layout(
-    membrane: MembraneModel,
+    membrane: object,
     length_um: float,
     diameter_um: float,
     compartments: int,

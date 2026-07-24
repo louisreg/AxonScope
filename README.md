@@ -79,6 +79,42 @@ center = result.nearest_position_index(250.0 * axs.um)
 print(result.t.shape, result.Vm[:, center].shape)
 ```
 
+`AxonSimulation.run()` is the convenience path. For composed work, create
+immutable plans and execute them through one runner so planning state can be
+reused deliberately. Population rows remain descriptive until that runner is
+asked to execute, estimate, inspect, or explicitly materialize them:
+
+```python
+plan = axs.AxonSimulation(
+    instance,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+).plan()
+
+runner = axs.Runner()
+estimate = runner.estimate(plan)
+result = runner.run(plan)
+```
+
+Several independent or ordered plans can share the same runner state through a
+backend-neutral study:
+
+```python
+study = axs.StudyPlan(
+    name="comparison",
+    tasks=(
+        axs.StudyTask("baseline", baseline_plan),
+        axs.StudyTask("follow_up", follow_up_plan, depends_on=("baseline",)),
+    ),
+)
+results = runner.run(study)
+follow_up = results["follow_up"]
+```
+
+Studies are fail-fast. `StudyExecutionError` retains completed task results, and
+`CancellationToken` requests cooperative cancellation between tasks or
+protocol iterations; an already dispatched kernel is allowed to finish.
+
 Run the executable version:
 
 ```bash

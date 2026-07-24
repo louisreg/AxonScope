@@ -10,6 +10,7 @@ from . import (
     inspection,
     membranes,
     performance,
+    plans,
     positions,
     protocols,
     recording,
@@ -28,8 +29,19 @@ from axonfleet.benchmarking import (
     reset_benchmark,
 )
 from axonfleet.identifiers import DriveId
-from axonfleet.inspection import SimulationInspection
+from axonfleet.inspection import PlanInspection, SimulationInspection
+from axonfleet.performance import PlanEstimate
 from axonfleet.population import AxonPopulation
+from axonfleet.plans import (
+    NumericAxisPlan,
+    PopulationPlan,
+    RunnablePlan,
+    SimulationPlan,
+    StudyPlan,
+    StudyTask,
+    SweepPlan,
+    ThresholdPlan,
+)
 from axonfleet.results import (
     VM_RASTER_OBSERVATION_KEY,
     VmRasterResult,
@@ -40,6 +52,13 @@ from axonfleet.runtime import (
     ExecutionPolicy,
     PrecisionPolicy,
     SolverPolicy,
+)
+from axonfleet.runner import (
+    CancellationToken,
+    PlanCancelledError,
+    Runner,
+    StudyExecutionError,
+    StudyResult,
 )
 from axonfleet.simulation import AxonSimulation
 from axonfleet.solvers import (
@@ -112,6 +131,7 @@ __all__ = [
     "inspection",
     "membranes",
     "performance",
+    "plans",
     "positions",
     "protocols",
     "recording",
@@ -124,6 +144,8 @@ __all__ = [
     "Stimulus",
     "DriveId",
     "SimulationInspection",
+    "PlanInspection",
+    "PlanEstimate",
     "Device",
     "ExecutionPolicy",
     "PrecisionPolicy",
@@ -131,6 +153,19 @@ __all__ = [
     "AxonInstance",
     "AxonPopulation",
     "AxonSimulation",
+    "NumericAxisPlan",
+    "PopulationPlan",
+    "RunnablePlan",
+    "Runner",
+    "CancellationToken",
+    "PlanCancelledError",
+    "StudyPlan",
+    "StudyExecutionError",
+    "StudyResult",
+    "StudyTask",
+    "SimulationPlan",
+    "SweepPlan",
+    "ThresholdPlan",
     "benchmark",
     "benchmark_report",
     "disable_benchmark",

@@ -161,8 +161,8 @@ def main() -> None:
             simulation.add_extracellular_stimulation(stimulation=stimulation)
             pool.append(simulation)
 
-        # Step 7: batched threshold search returns one threshold per row.
-        curve = axs.protocols.find_threshold(
+        # Step 7: describe the search lazily, then execute it through one runner.
+        plan = axs.protocols.find_threshold_plan(
             tuple(pool),
             rows=diameters,
             update=lambda sim, current, name=waveform: update_point_source_current(
@@ -181,6 +181,7 @@ def main() -> None:
             progress=True,
             solver_progress="plain" if show_cold_solver_progress else False,
         )
+        curve = axs.Runner().run(plan)
         show_cold_solver_progress = False
         curves[waveform] = curve
         preview_stimuli[waveform] = build_waveform_stimulus(waveform, preview_current)

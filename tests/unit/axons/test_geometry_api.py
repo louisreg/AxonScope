@@ -121,8 +121,8 @@ def test_template_axon_diameters_are_quantized_for_cache_reuse():
     )
     assert small.layout is equivalent_small.layout
     assert (
-        flatten_layout(small.layout).membrane_models[0]
-        is flatten_layout(equivalent_small.layout).membrane_models[0]
+        flatten_layout(small.layout).membranes[0]
+        is flatten_layout(equivalent_small.layout).membranes[0]
     )
 
 
@@ -168,8 +168,8 @@ def test_default_mrg_layout_key_separates_structural_parameters():
         shifted.node_position_values(unit=axs.um)[0]
     )
     assert (
-        flatten_layout(base.layout).membrane_models[0]
-        != flatten_layout(warmer.layout).membrane_models[0]
+        flatten_layout(base.layout).membranes[0]
+        != flatten_layout(warmer.layout).membranes[0]
     )
 
 
@@ -203,7 +203,7 @@ def test_cached_default_mrg_layout_matches_explicit_uncached_construction():
             getattr(cached_flat, field),
             getattr(explicit_flat, field),
         )
-    assert cached_flat.membrane_models == explicit_flat.membrane_models
+    assert cached_flat.membranes == explicit_flat.membranes
     assert cached_flat.section_names == explicit_flat.section_names
     assert cached_flat.section_tags == explicit_flat.section_tags
     assert cached_flat.periaxonal_layers == explicit_flat.periaxonal_layers

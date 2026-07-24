@@ -136,8 +136,8 @@ def test_double_cable_backend_static_identity_is_structural():
     backend_a = _membrane_backend_from_axon(ax_a)
     backend_b = _membrane_backend_from_axon(ax_b)
 
-    membranes_a = flatten_layout(ax_a.layout).membrane_models
-    membranes_b = flatten_layout(ax_b.layout).membrane_models
+    membranes_a = flatten_layout(ax_a.layout).membranes
+    membranes_b = flatten_layout(ax_b.layout).membranes
     assert membranes_a == membranes_b
     assert hash(membranes_a[0]) == hash(membranes_b[0])
     assert backend_a == backend_b

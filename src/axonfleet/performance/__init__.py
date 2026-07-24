@@ -18,7 +18,12 @@ from axonfleet.runtime.execution import (
     benchmark_plan_input_lowering,
     benchmark_vm_raster_definitions,
 )
-from axonfleet.dispatcher.plan import DispatchGroup, build_dispatch_plan
+from axonfleet.dispatcher.numeric_axis import NumericAxisInput
+from axonfleet.dispatcher.plan import (
+    DispatchGroup,
+    build_dispatch_plan,
+    expand_dispatch_plan_for_numeric_axis,
+)
 from axonfleet.population import AxonPopulation
 from axonfleet.preparation.stimulation_rows import extracellular_stimulation_rows
 from axonfleet.recording import Recording
@@ -238,6 +243,126 @@ class SimulationEstimate:
         print_simulation_estimate(self, file=file, rich=rich)
 
 
+@dataclass(frozen=True)
+class PlanEstimateComponent:
+    """Estimate contribution from one composed-plan execution unit."""
+
+    key: str
+    plan_kind: str
+    expected_rows: int
+    simulation_executions_min: int
+    simulation_executions_max: int
+    peak: SimulationEstimate | None
+    depends_on: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable component record."""
+
+        return {
+            "key": self.key,
+            "plan_kind": self.plan_kind,
+            "expected_rows": self.expected_rows,
+            "simulation_executions_min": self.simulation_executions_min,
+            "simulation_executions_max": self.simulation_executions_max,
+            "peak": None if self.peak is None else self.peak.to_dict(),
+            "depends_on": list(self.depends_on),
+        }
+
+
+@dataclass(frozen=True)
+class PlanEstimate:
+    """Peak memory and repeated-work bounds for a composed runnable plan.
+
+    ``peak`` is the largest single execution estimate under the runner's
+    current sequential plan scheduling. Execution counts describe repeated
+    simulation work; they are deliberately not summed as concurrent memory.
+    """
+
+    plan_kind: str
+    expected_rows: int
+    simulation_executions_min: int
+    simulation_executions_max: int
+    peak: SimulationEstimate | None
+    components: tuple[PlanEstimateComponent, ...]
+    notes: tuple[str, ...] = ()
+    name: str | None = None
+
+    @property
+    def peak_bytes(self) -> int:
+        """Largest estimated memory pressure for one scheduled execution."""
+
+        return 0 if self.peak is None else self.peak.total_bytes
+
+    @property
+    def peak_mib(self) -> float:
+        """Largest estimated memory pressure in MiB."""
+
+        return self.peak_bytes / (1024**2)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable composed estimate."""
+
+        return {
+            "plan_kind": self.plan_kind,
+            "name": self.name,
+            "expected_rows": self.expected_rows,
+            "simulation_executions_min": self.simulation_executions_min,
+            "simulation_executions_max": self.simulation_executions_max,
+            "peak_bytes": self.peak_bytes,
+            "peak_mib": self.peak_mib,
+            "peak": None if self.peak is None else self.peak.to_dict(),
+            "components": [component.to_dict() for component in self.components],
+            "notes": list(self.notes),
+        }
+
+    def format(self) -> str:
+        """Format peak memory and repeated-work bounds."""
+
+        execution_text = _execution_range_text(
+            self.simulation_executions_min,
+            self.simulation_executions_max,
+        )
+        lines = [
+            "AxonFleet composed plan estimate",
+            (
+                f"  kind={self.plan_kind}, rows={self.expected_rows}"
+                if self.name is None
+                else f"  kind={self.plan_kind}, name={self.name!r}, "
+                f"rows={self.expected_rows}"
+            ),
+            f"  simulation_executions={execution_text}",
+            f"  peak={self.peak_mib:.3f} MiB (not cumulative work)",
+            "components:",
+        ]
+        for component in self.components:
+            component_executions = _execution_range_text(
+                component.simulation_executions_min,
+                component.simulation_executions_max,
+            )
+            peak_mib = 0.0 if component.peak is None else component.peak.total_mib
+            dependency_text = (
+                "" if not component.depends_on else f", after={component.depends_on}"
+            )
+            lines.append(
+                f"  {component.key}: kind={component.plan_kind}, "
+                f"rows={component.expected_rows}, executions={component_executions}, "
+                f"peak={peak_mib:.3f} MiB{dependency_text}"
+            )
+        if self.notes:
+            lines.append("notes:")
+            lines.extend(f"  - {note}" for note in self.notes)
+        return "\n".join(lines)
+
+    def print(self, file: TextIO | None = None) -> None:
+        """Print the composed estimate."""
+
+        print(self.format(), file=file)
+
+
+def _execution_range_text(lower: int, upper: int) -> str:
+    return str(lower) if lower == upper else f"{lower}..{upper}"
+
+
 def estimate_simulation(
     axons: Axon | AxonInstance | AxonPopulation | Iterable[Axon | AxonInstance],
     *,
@@ -251,6 +376,7 @@ def estimate_simulation(
     device: Device | None = None,
     precision: PrecisionPolicy | None = None,
     memory_budget_bytes: int | None = None,
+    numeric_axis: NumericAxisInput | None = None,
 ) -> SimulationEstimate:
     """Estimate memory pressure for a public simulation definition."""
 
@@ -283,6 +409,9 @@ def estimate_simulation(
         batch_options=batch_options,
     )
     plan = build_dispatch_plan(instances)
+    if numeric_axis is not None:
+        plan = expand_dispatch_plan_for_numeric_axis(plan, numeric_axis)
+    axon_count = len(plan.items)
     estimate_groups = tuple(
         _estimate_dispatch_group(
             group,
@@ -1083,6 +1212,8 @@ def _recording_label(recording: Recording | None, batch_options: BatchOptions | 
 
 __all__ = [
     "MemoryEstimateItem",
+    "PlanEstimate",
+    "PlanEstimateComponent",
     "SimulationEstimate",
     "SimulationEstimateGroup",
     "estimate_simulation",

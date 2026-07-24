@@ -107,6 +107,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   different extracellular waveforms.
 - `protocols/03_protocol_result_views.py`: inspect protocol summaries as
   compact text, dataframes, direct view rows, and plots without running a solver.
+- `protocols/04_lazy_sweep_plan.py`: describe a generic value sweep without
+  executing it, then estimate and run it through one reusable runner.
 
 ### Runtime
 
@@ -119,6 +121,9 @@ still runnable examples, but they explain the moving parts more explicitly.
   policies and inspect the resolved double-cable backend route.
 - `runtime/04_cache_policy.py`: inspect deterministic generated/runtime cache
   sections, generate one requested membrane target, and clean known artifacts.
+- `runtime/05_lazy_plans.py`: compose lazy simulation plans into a named
+  study, inspect peak memory versus repeated work, and execute its tasks
+  through one state-reusing runner.
 
 ## With NRV
 

@@ -46,9 +46,6 @@ from axonfleet.runtime.recording import (
 from axonfleet.runtime.jax.recording.lowering import (
     lower_observers_for_cohort,
 )
-from axonfleet.runtime.group_preparation import (
-    prepared_cohort_for_current_group,
-)
 from axonfleet.runtime.jax.preparation.runtime import prepare_batch_runtime
 from axonfleet.runtime.jax.preparation.stacking import group_cm_uF_cm2
 from axonfleet.runtime.jax.kernels.double_cable import DoubleCableBatchKernel
@@ -99,10 +96,12 @@ def enqueue_jax_batch_group(
     recording_plan: RecordingPlan | None = None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
+    preparation_cache: Any | None = None,
 ) -> PendingJaxBatchGroup:
     """Prepare and enqueue one JAX batch group without waiting for device work."""
 
     if group.mode == "double":
+        _require_preparation_cache(preparation_cache)
         return _enqueue_double_cable_batch_group(
             group,
             tsim_ms=tsim_ms,
@@ -112,12 +111,14 @@ def enqueue_jax_batch_group(
             recording_plan=recording_plan,
             progress_callback=progress_callback,
             runtime_context=runtime_context,
+            preparation_cache=preparation_cache,
         )
     if group.mode != "single":
         raise ValueError(
             f"Unsupported JAX dispatch group mode {group.mode!r}; "
             "expected 'single' or 'double'."
         )
+    _require_preparation_cache(preparation_cache)
     return _enqueue_single_cable_batch_group(
         group,
         tsim_ms=tsim_ms,
@@ -127,7 +128,17 @@ def enqueue_jax_batch_group(
         recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+        preparation_cache=preparation_cache,
     )
+
+
+def _require_preparation_cache(preparation_cache: Any | None) -> None:
+    if preparation_cache is None or not callable(
+        getattr(preparation_cache, "for_current_group", None)
+    ):
+        raise RuntimeError(
+            "JAX group execution requires the Runner-owned preparation cache."
+        )
 
 
 def finalize_jax_batch_group(pending: PendingJaxBatchGroup) -> tuple[DispatchRecord, ...]:
@@ -156,6 +167,7 @@ def _prepare_jax_batch_group(
     dt_ms: float,
     progress_callback: Any,
     runtime_context: Any | None,
+    preparation_cache: Any,
 ) -> _PreparedJaxBatchGroup:
     """Prepare runtime arrays and cohort rows through the shared host path."""
 
@@ -176,7 +188,7 @@ def _prepare_jax_batch_group(
             mode=group.mode,
             nx=group.nx,
         ):
-            cohort = prepared_cohort_for_current_group(group)
+            cohort = preparation_cache.for_current_group(group)
             record_benchmark_metadata(
                 materialized_axon_rows=cohort.materialized_axons.size,
                 materialized_axon_templates=cohort.materialized_axons.template_count,
@@ -766,6 +778,7 @@ def _enqueue_single_cable_batch_group(
     recording_plan: RecordingPlan | None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
+    preparation_cache: Any,
 ) -> PendingJaxBatchGroup:
     """Enqueue a homogeneous single-cable group through imposed-field batching."""
 
@@ -779,6 +792,7 @@ def _enqueue_single_cable_batch_group(
         dt_ms=dt_ms,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+        preparation_cache=preparation_cache,
     )
     runtime = prepared.runtime
     cohort = prepared.cohort
@@ -891,6 +905,7 @@ def _enqueue_double_cable_batch_group(
     recording_plan: RecordingPlan | None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
+    preparation_cache: Any,
 ) -> PendingJaxBatchGroup:
     """Enqueue a homogeneous double-cable group through full double-cable batching."""
     if recording_plan is not None and recording_plan.wants_observables:
@@ -904,6 +919,7 @@ def _enqueue_double_cable_batch_group(
         dt_ms=dt_ms,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+        preparation_cache=preparation_cache,
     )
     runtime = prepared.runtime
     cohort = prepared.cohort

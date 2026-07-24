@@ -5,14 +5,14 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from axonfleet.protocols.recruitment import recruitment_sweep
+from axonfleet.protocols.recruitment import recruitment_sweep, recruitment_sweep_plan
 from axonfleet.protocols.results import (
     PoolSweepResult,
     RecruitmentCurve,
     ThresholdCurve,
 )
-from axonfleet.protocols.sweep import pool_sweep
-from axonfleet.protocols.threshold import find_threshold
+from axonfleet.protocols.sweep import pool_sweep, pool_sweep_plan
+from axonfleet.protocols.threshold import find_threshold, find_threshold_plan
 from axonfleet.protocols.types import ThresholdStatus
 from axonfleet.protocols.updates import ExtracellularWaveformUpdate
 
@@ -30,7 +30,10 @@ __all__ = [
     "ThresholdCurve",
     "ThresholdStatus",
     "find_threshold",
+    "find_threshold_plan",
     "pool_sweep",
+    "pool_sweep_plan",
     "recruitment_sweep",
+    "recruitment_sweep_plan",
     "views",
 ]

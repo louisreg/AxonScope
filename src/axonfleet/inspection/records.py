@@ -216,6 +216,83 @@ class SimulationInspection:
         return plot_simulation_inspection_details(self, axes=axes)
 
 
+@dataclass(frozen=True)
+class PlanInspectionComponent:
+    """Structural inspection of one composed-plan execution unit."""
+
+    key: str
+    plan_kind: str
+    expected_rows: int
+    simulation_executions_min: int
+    simulation_executions_max: int
+    simulation: SimulationInspection | None
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PlanInspection:
+    """Structural inspection and work bounds for a composed runnable plan."""
+
+    plan_kind: str
+    expected_rows: int
+    simulation_executions_min: int
+    simulation_executions_max: int
+    components: tuple[PlanInspectionComponent, ...]
+    notes: tuple[str, ...] = ()
+    name: str | None = None
+
+    def format(self) -> str:
+        """Return a compact composed-plan inspection."""
+
+        execution_text = _execution_range_text(
+            self.simulation_executions_min,
+            self.simulation_executions_max,
+        )
+        lines = [
+            "AxonFleet composed plan inspection",
+            (
+                f"  kind={self.plan_kind}, rows={self.expected_rows}"
+                if self.name is None
+                else f"  kind={self.plan_kind}, name={self.name!r}, "
+                f"rows={self.expected_rows}"
+            ),
+            f"  simulation_executions={execution_text}",
+            "components:",
+        ]
+        for component in self.components:
+            component_executions = _execution_range_text(
+                component.simulation_executions_min,
+                component.simulation_executions_max,
+            )
+            groups = (
+                0
+                if component.simulation is None
+                else len(component.simulation.dispatch_groups)
+            )
+            dependency_text = (
+                "" if not component.depends_on else f", after={component.depends_on}"
+            )
+            lines.append(
+                f"  {component.key}: kind={component.plan_kind}, "
+                f"rows={component.expected_rows}, executions={component_executions}, "
+                f"dispatch_groups={groups}{dependency_text}"
+            )
+        if self.notes:
+            lines.append("notes:")
+            lines.extend(f"  - {note}" for note in self.notes)
+        return "\n".join(lines)
+
+    def print(self, file: TextIO | None = None, *, rich: bool | None = None) -> None:
+        """Print the composed-plan inspection."""
+
+        del rich
+        print(self.format(), file=file)
+
+
+def _execution_range_text(lower: int, upper: int) -> str:
+    return str(lower) if lower == upper else f"{lower}..{upper}"
+
+
 __all__ = [
     "AssemblyDetailInspection",
     "DispatchGroupInspection",
@@ -224,6 +301,8 @@ __all__ = [
     "MemoryInspection",
     "MembraneSourceInspection",
     "PaddingInspection",
+    "PlanInspection",
+    "PlanInspectionComponent",
     "PlanningInspection",
     "PreparationInspection",
     "ProbeInspection",

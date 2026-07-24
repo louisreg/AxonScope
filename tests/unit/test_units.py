@@ -332,13 +332,19 @@ def test_membrane_templates_normalize_quantity_like_parameters():
     assert tigerholm.params["pump_ko"] == 5.6
 
 
-def test_membrane_templates_require_unit_aware_diameter():
-    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
-        axs.membranes.Tigerholm(diameter=1.2)
-    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
-        axs.membranes.Schild94(diameter=0.8)
-    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
-        axs.membranes.Schild97(diameter=0.8)
+def test_membrane_templates_defer_unit_validation_until_materialization():
+    models = (
+        axs.membranes.Tigerholm(diameter=1.2),
+        axs.membranes.Schild94(diameter=0.8),
+        axs.membranes.Schild97(diameter=0.8),
+    )
+
+    for model in models:
+        with pytest.raises(
+            TypeError,
+            match="diameter must include units compatible with length",
+        ):
+            _ = model.params
 
 
 def test_pint_constructor_reports_missing_dependency_when_absent():
